@@ -2,13 +2,9 @@
 
 # Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
 #   http://www.apache.org/licenses/LICENSE-2.0
 #
@@ -270,7 +266,7 @@ build_glog() {
     CPPFLAGS="-I${TP_INCLUDE_DIR}" \
     LDFLAGS="-L${TP_LIB_DIR}" \
     CFLAGS="-fPIC" \
-    ./configure --prefix=$TP_INSTALL_DIR
+    ./configure --prefix=$TP_INSTALL_DIR --enable-frame-pointers
     make -j$PARALLEL && make install
 }
 
@@ -332,8 +328,7 @@ build_gperftools() {
     LDFLAGS="-L${TP_LIB_DIR}" \
     LD_LIBRARY_PATH="${TP_LIB_DIR}" \
     CFLAGS="-fPIC" \
-    LIBS="-lunwind" \
-    ./configure --prefix=$TP_INSTALL_DIR --enable-libunwind --with-pic
+    ./configure --prefix=$TP_INSTALL_DIR --disable-libunwind --with-pic --enable-frame-pointers
     make -j$PARALLEL && make install
 }
 
@@ -399,7 +394,7 @@ build_curl() {
     LDFLAGS="-L${TP_LIB_DIR}" \
     CFLAGS="-fPIC" \
     ./configure --prefix=$TP_INSTALL_DIR \
-    --with-ssl=$TP_INSTALL_DIR
+    --without-ssl --without-libidn2 --disable-ldap
     make -j$PARALLEL && make install
 }
 
@@ -468,7 +463,7 @@ build_glog
 build_gtest
 build_rapidjson
 build_snappy
-build_libunwind
+# build_libunwind // deprecated
 build_gperftools
 build_curl
 build_re2

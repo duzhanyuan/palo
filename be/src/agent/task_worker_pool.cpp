@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -42,6 +38,7 @@
 #include "olap/utils.h"
 #include "common/resource_tls.h"
 #include "agent/cgroups_mgr.h"
+#include "service/backend_options.h"
 
 using std::deque;
 using std::list;
@@ -54,6 +51,17 @@ using std::to_string;
 using std::vector;
 
 namespace palo {
+
+const uint32_t DOWNLOAD_FILE_MAX_RETRY = 3;
+const uint32_t TASK_FINISH_MAX_RETRY = 3;
+const uint32_t PUSH_MAX_RETRY = 1;
+const uint32_t REPORT_TASK_WORKER_COUNT = 1;
+const uint32_t REPORT_DISK_STATE_WORKER_COUNT = 1;
+const uint32_t REPORT_OLAP_TABLE_WORKER_COUNT = 1;
+const uint32_t LIST_REMOTE_FILE_TIMEOUT = 15;
+const std::string HTTP_REQUEST_PREFIX = "/api/_tablet/_download?";
+const std::string HTTP_REQUEST_TOKEN_PARAM = "&token=";
+const std::string HTTP_REQUEST_FILE_PARAM = "&file=";
 
 std::atomic_ulong TaskWorkerPool::_s_report_version(time(NULL) * 10000);
 MutexLock TaskWorkerPool::_s_task_signatures_lock;
@@ -73,7 +81,7 @@ TaskWorkerPool::TaskWorkerPool(
     _agent_utils = new AgentUtils();
     _master_client = new MasterServerClient(_master_info, &_master_service_client_cache);
     _command_executor = new CommandExecutor();
-    _backend.__set_host(_agent_utils->get_local_ip());
+    _backend.__set_host(BackendOptions::get_localhost());
     _backend.__set_be_port(config::be_port);
     _backend.__set_http_port(config::webserver_port);
 }
@@ -299,7 +307,7 @@ uint32_t TaskWorkerPool::_get_next_task_index(
         if (task.__isset.resource_info) {
             user = task.resource_info.user;
         }
-        
+
         if (priority == TPriority::HIGH) {
             if (task.__isset.priority && task.priority == TPriority::HIGH) {
                 index = i;
@@ -308,7 +316,7 @@ uint32_t TaskWorkerPool::_get_next_task_index(
                 continue;
             }
         }
-        
+
         if (improper_users.count(user) != 0) {
             continue;
         }
@@ -340,12 +348,12 @@ uint32_t TaskWorkerPool::_get_next_task_index(
             improper_users.insert(user);
         }
     }
-    
+
     if (index == -1) {
         if (priority == TPriority::HIGH) {
             return index;
         }
-    
+
         index = 0;
         if (tasks[0].__isset.resource_info) {
             user = tasks[0].resource_info.user;
@@ -370,7 +378,7 @@ void* TaskWorkerPool::_create_table_worker_thread_callback(void* arg_this) {
         TAgentTaskRequest agent_task_req;
         TCreateTabletReq create_tablet_req;
         {
-            lock_guard<MutexLock> worker_thread_lock(worker_pool_this->_worker_thread_lock);        
+            lock_guard<MutexLock> worker_thread_lock(worker_pool_this->_worker_thread_lock);
             while (worker_pool_this->_tasks.empty()) {
                 worker_pool_this->_worker_thread_condition_lock.wait();
             }
@@ -421,7 +429,7 @@ void* TaskWorkerPool::_drop_table_worker_thread_callback(void* arg_this) {
         TAgentTaskRequest agent_task_req;
         TDropTabletReq drop_tablet_req;
         {
-            lock_guard<MutexLock> worker_thread_lock(worker_pool_this->_worker_thread_lock); 
+            lock_guard<MutexLock> worker_thread_lock(worker_pool_this->_worker_thread_lock);
             while (worker_pool_this->_tasks.empty()) {
                 worker_pool_this->_worker_thread_condition_lock.wait();
             }
@@ -642,7 +650,7 @@ void* TaskWorkerPool::_push_worker_thread_callback(void* arg_this) {
     // Try to register to cgroups_mgr
     CgroupsMgr::apply_system_cgroup();
     TaskWorkerPool* worker_pool_this = (TaskWorkerPool*)arg_this;
-    
+
     // gen high priority worker thread
     TPriority::type priority = TPriority::NORMAL;
     int32_t push_worker_count_high_priority = config::push_worker_count_high_priority;
@@ -679,7 +687,7 @@ void* TaskWorkerPool::_push_worker_thread_callback(void* arg_this) {
                 worker_pool_this->_worker_thread_condition_lock.notify();
                 break;
             }
-            
+
             agent_task_req = worker_pool_this->_tasks[index];
             if (agent_task_req.__isset.resource_info) {
                 user = agent_task_req.resource_info.user;
@@ -687,7 +695,7 @@ void* TaskWorkerPool::_push_worker_thread_callback(void* arg_this) {
             push_req = agent_task_req.push_req;
             worker_pool_this->_tasks.erase(worker_pool_this->_tasks.begin() + index);
         } while (0);
-        
+
 #ifndef BE_TEST
         if (index < 0) {
             // there is no high priority task in queue
@@ -695,7 +703,7 @@ void* TaskWorkerPool::_push_worker_thread_callback(void* arg_this) {
             continue;
         }
 #endif
-        
+
         OLAP_LOG_INFO("get push task. signature: %ld, user: %s, priority: %d",
                       agent_task_req.signature, user.c_str(), priority);
 
@@ -737,11 +745,11 @@ void* TaskWorkerPool::_push_worker_thread_callback(void* arg_this) {
         } else {
             status = PALO_TASK_REQUEST_ERROR;
         }
-        
+
         // Return result to fe
         vector<string> error_msgs;
         TStatus task_status;
-        
+
         TFinishTaskRequest finish_task_request;
         finish_task_request.__set_backend(worker_pool_this->_backend);
         finish_task_request.__set_task_type(agent_task_req.task_type);
@@ -832,7 +840,7 @@ void* TaskWorkerPool::_clone_worker_thread_callback(void* arg_this) {
                                  agent_task_req.signature);
                 error_msgs.push_back("clone get local root path failed.");
                 status = PALO_ERROR;
-            } 
+            }
         }
 
         string src_file_path;
@@ -864,8 +872,8 @@ void* TaskWorkerPool::_clone_worker_thread_callback(void* arg_this) {
                 error_msgs.push_back("load header failed.");
                 status = PALO_ERROR;
             }
-        } 
-        
+        }
+
 #ifndef BE_TEST
         // Clean useless dir, if failed, ignore it.
         if (status != PALO_SUCCESS && status != PALO_CREATE_TABLE_EXIST) {
@@ -907,11 +915,43 @@ void* TaskWorkerPool::_clone_worker_thread_callback(void* arg_this) {
                                  agent_task_req.signature);
                 error_msgs.push_back("clone success, but get tablet info failed.");
                 status = PALO_ERROR;
+            } else if (
+                (clone_req.__isset.committed_version
+                        && clone_req.__isset.committed_version_hash)
+                        && (tablet_info.version < clone_req.committed_version ||
+                            (tablet_info.version == clone_req.committed_version
+                            && tablet_info.version_hash != clone_req.committed_version_hash))) {
+
+                // we need to check if this cloned table's version is what we expect.
+                // if not, maybe this is a stale remaining table which is waiting for drop.
+                // we drop it.
+                OLAP_LOG_INFO("begin to drop the stale table. "
+                        "tablet id: %ld, schema hash: %ld, signature: %ld "
+                        "version: %ld, version_hash %ld "
+                        "expected version: %ld, version_hash: %ld",
+                        clone_req.tablet_id, clone_req.schema_hash,
+                        agent_task_req.signature,
+                        tablet_info.version, tablet_info.version_hash,
+                        clone_req.committed_version, clone_req.committed_version_hash);
+
+                TDropTabletReq drop_req;
+                drop_req.tablet_id = clone_req.tablet_id;
+                drop_req.schema_hash = clone_req.schema_hash;
+                AgentStatus drop_status = worker_pool_this->_drop_table(drop_req);
+                if (drop_status != PALO_SUCCESS) {
+                    // just log
+                    OLAP_LOG_WARNING(
+                        "drop stale cloned table failed! tabelt id: %ld", clone_req.tablet_id);
+                }
+
+                status = PALO_ERROR;
             } else {
                 OLAP_LOG_INFO("clone get tablet info success. "
-                              "tablet id: %ld, schema hash: %ld, signature: %ld",
+                              "tablet id: %ld, schema hash: %ld, signature: %ld "
+                              "version: %ld, version_hash %ld",
                               clone_req.tablet_id, clone_req.schema_hash,
-                              agent_task_req.signature);
+                              agent_task_req.signature,
+                              tablet_info.version, tablet_info.version_hash);
                 tablet_infos.push_back(tablet_info);
             }
         }
@@ -942,7 +982,7 @@ void* TaskWorkerPool::_clone_worker_thread_callback(void* arg_this) {
         worker_pool_this->_remove_task_info(agent_task_req.task_type, agent_task_req.signature, "");
 #ifndef BE_TEST
     }
-#endif    
+#endif
 
     return (void*)0;
 }
@@ -955,6 +995,9 @@ AgentStatus TaskWorkerPool::_clone_copy(
         string* src_file_path,
         vector<string>* error_msgs) {
     AgentStatus status = PALO_SUCCESS;
+
+
+    std::string token = _master_info.token;
 
     for (auto src_backend : clone_req.src_backends) {
         stringstream http_host_stream;
@@ -993,7 +1036,7 @@ AgentStatus TaskWorkerPool::_clone_copy(
                               src_host->host.c_str(), src_file_path->c_str(),
                               signature);
             } else {
-                OLAP_LOG_WARNING("clone make snapshot suceess, "
+                OLAP_LOG_WARNING("clone make snapshot success, "
                                  "but get src file path failed. signature: %ld",
                                  signature);
                 status = PALO_ERROR;
@@ -1038,7 +1081,9 @@ AgentStatus TaskWorkerPool::_clone_copy(
 
         // Get remove dir file list
         FileDownloader::FileDownloaderParam downloader_param;
-        downloader_param.remote_file_path = http_host + HTTP_REQUEST_PREFIX + src_file_full_path;
+        downloader_param.remote_file_path = http_host + HTTP_REQUEST_PREFIX
+            + HTTP_REQUEST_TOKEN_PARAM + token
+            + HTTP_REQUEST_FILE_PARAM + src_file_full_path;
         downloader_param.curl_opt_timeout = LIST_REMOTE_FILE_TIMEOUT;
 
 #ifndef BE_TEST
@@ -1120,8 +1165,9 @@ AgentStatus TaskWorkerPool::_clone_copy(
         // Get copy from remote
         for (auto file_name : file_name_list) {
             download_retry_time = 0;
-            downloader_param.remote_file_path =
-                    http_host + HTTP_REQUEST_PREFIX + src_file_full_path + file_name;
+            downloader_param.remote_file_path = http_host + HTTP_REQUEST_PREFIX
+                + HTTP_REQUEST_TOKEN_PARAM + token
+                + HTTP_REQUEST_FILE_PARAM + src_file_full_path + file_name;
             downloader_param.local_file_path = local_file_full_path + file_name;
 
             // Get file length
@@ -1171,7 +1217,7 @@ AgentStatus TaskWorkerPool::_clone_copy(
                 status = PALO_ERROR;
                 break;
             }
-            
+
             estimate_time_out = file_size / config::download_low_speed_limit_kbps / 1024;
             if (estimate_time_out < config::download_low_speed_time) {
                 estimate_time_out = config::download_low_speed_time;
@@ -1211,7 +1257,7 @@ AgentStatus TaskWorkerPool::_clone_copy(
                                          src_host->host.c_str(),
                                          downloader_param.remote_file_path.c_str(),
                                          signature, file_size, local_file_size);
-                        download_status = PALO_FILE_DOWNLOAD_FAILED; 
+                        download_status = PALO_FILE_DOWNLOAD_FAILED;
                     } else {
                         chmod(downloader_param.local_file_path.c_str(), S_IRUSR | S_IWUSR);
                         break;
@@ -1258,7 +1304,7 @@ AgentStatus TaskWorkerPool::_clone_copy(
         if (status == PALO_SUCCESS) {
             break;
         }
-    } // clone copy from one backend 
+    } // clone copy from one backend
     return status;
 }
 
@@ -1273,7 +1319,7 @@ void* TaskWorkerPool::_storage_medium_migrate_worker_thread_callback(void* arg_t
         TAgentTaskRequest agent_task_req;
         TStorageMediumMigrateReq storage_medium_migrate_req;
         {
-            lock_guard<MutexLock> worker_thread_lock(worker_pool_this->_worker_thread_lock); 
+            lock_guard<MutexLock> worker_thread_lock(worker_pool_this->_worker_thread_lock);
             while (worker_pool_this->_tasks.empty()) {
                 worker_pool_this->_worker_thread_condition_lock.wait();
             }
@@ -1381,7 +1427,7 @@ void* TaskWorkerPool::_check_consistency_worker_thread_callback(void* arg_this) 
         TAgentTaskRequest agent_task_req;
         TCheckConsistencyReq check_consistency_req;
         {
-            lock_guard<MutexLock> worker_thread_lock(worker_pool_this->_worker_thread_lock); 
+            lock_guard<MutexLock> worker_thread_lock(worker_pool_this->_worker_thread_lock);
             while (worker_pool_this->_tasks.empty()) {
                 worker_pool_this->_worker_thread_condition_lock.wait();
             }
@@ -1450,7 +1496,7 @@ void* TaskWorkerPool::_report_task_worker_thread_callback(void* arg_this) {
                       worker_pool_this->_master_info.network_address.port);
         TMasterResult result;
         AgentStatus status = worker_pool_this->_master_client->report(request, &result);
- 
+
         if (status == PALO_SUCCESS) {
             OLAP_LOG_INFO("finish report task success. return code: %d",
                           result.status.status_code);
@@ -1648,7 +1694,7 @@ void* TaskWorkerPool::_upload_worker_thread_callback(void* arg_this) {
         worker_pool_this->_finish_task(finish_task_request);
         worker_pool_this->_remove_task_info(agent_task_req.task_type, agent_task_req.signature, "");
 #ifndef BE_TEST
-    }    
+    }
 #endif
     return (void*)0;
 }
@@ -1696,7 +1742,7 @@ void* TaskWorkerPool::_restore_worker_thread_callback(void* arg_this) {
             OLAP_LOG_WARNING("Write remote source info to file failed. Path: %s",
                              info_file_path.c_str());
         }
-        
+
         // Get local disk to restore from olap
         string local_shard_root_path;
         if (status_code == TStatusCode::OK) {
@@ -1713,7 +1759,7 @@ void* TaskWorkerPool::_restore_worker_thread_callback(void* arg_this) {
         stringstream local_file_path_stream;
         local_file_path_stream << local_shard_root_path << "/" << restore_request.tablet_id << "/";
         string local_file_path(local_file_path_stream.str());
-        
+
         // Download files from remote source
         if (status_code == TStatusCode::OK) {
             string command = "sh " + config::trans_file_tool_path + " " + label + " download " +
@@ -1728,7 +1774,7 @@ void* TaskWorkerPool::_restore_worker_thread_callback(void* arg_this) {
                 OLAP_LOG_WARNING("Download file failed. Error: %s", errmsg.c_str());
             }
         }
-        
+
         // Delete tmp file
         boost::filesystem::path file_path(info_file_path);
         if (boost::filesystem::exists(file_path)) {
@@ -1761,7 +1807,7 @@ void* TaskWorkerPool::_restore_worker_thread_callback(void* arg_this) {
                         file_path_suffix != ".dat") {
                     continue;
                 }
-                
+
                 // Get new file name
                 stringstream new_file_name_stream;
                 char sperator = '_';
@@ -1808,7 +1854,7 @@ void* TaskWorkerPool::_restore_worker_thread_callback(void* arg_this) {
                     restore_request.schema_hash,
                     agent_task_req.signature,
                     &tablet_info);
-    
+
             if (get_tablet_info_status != PALO_SUCCESS) {
                 OLAP_LOG_WARNING("Restore success, but get new tablet info failed."
                                  "tablet_id: %ld, schema_hash: %ld, signature: %ld.",
@@ -1832,7 +1878,7 @@ void* TaskWorkerPool::_restore_worker_thread_callback(void* arg_this) {
         worker_pool_this->_finish_task(finish_task_request);
         worker_pool_this->_remove_task_info(agent_task_req.task_type, agent_task_req.signature, "");
 #ifndef BE_TEST
-    }    
+    }
 #endif
     return (void*)0;
 }
@@ -1940,7 +1986,7 @@ void* TaskWorkerPool::_release_snapshot_thread_callback(void* arg_this) {
             OLAP_LOG_INFO("release_snapshot success. snapshot_path: %s, status: %d",
                           snapshot_path.c_str(), release_snapshot_status);
         }
-    
+
         task_status.__set_status_code(status_code);
         task_status.__set_error_msgs(error_msgs);
 

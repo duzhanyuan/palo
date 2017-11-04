@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -200,7 +196,7 @@ public class BackupHandler extends Daemon {
             }
 
             if (backupObjNames.isEmpty()) {
-                throw new DdlException("Database[" + db.getName() + "] is empty. no need to backup");
+                throw new DdlException("Database[" + db.getFullName() + "] is empty. no need to backup");
             }
 
             List<OlapTable> backupTables = Lists.newArrayList();
@@ -430,7 +426,7 @@ public class BackupHandler extends Daemon {
             long dbId = db.getId();
             AbstractBackupJob job = dbIdToJob.get(dbId);
             if (job == null) {
-                throw new DdlException("There is no job in database[" + db.getName() + "]");
+                throw new DdlException("There is no job in database[" + db.getFullName() + "]");
             }
 
             job.setErrMsg("user cancelled");

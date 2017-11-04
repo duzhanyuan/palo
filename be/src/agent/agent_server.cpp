@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -78,11 +74,11 @@ AgentServer::AgentServer(ExecEnv* exec_env,
     }
 
     // create tmp dir
-    boost::filesystem::path tmp_path(config::agent_tmp_dir);
-    if (boost::filesystem::exists(tmp_path)) {
-        boost::filesystem::remove_all(tmp_path);
-    }
-    boost::filesystem::create_directories(config::agent_tmp_dir);
+//    boost::filesystem::path tmp_path(config::agent_tmp_dir);
+//    if (boost::filesystem::exists(tmp_path)) {
+//        boost::filesystem::remove_all(tmp_path);
+//    }
+//    boost::filesystem::create_directories(config::agent_tmp_dir);
 
     // init task worker pool
     _create_table_workers = new TaskWorkerPool(

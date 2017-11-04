@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -38,6 +34,7 @@ import com.baidu.palo.planner.PlanNodeId;
 import com.baidu.palo.planner.Planner;
 import com.baidu.palo.planner.ResultSink;
 import com.baidu.palo.planner.ScanNode;
+import com.baidu.palo.service.FrontendOptions;
 import com.baidu.palo.system.Backend;
 import com.baidu.palo.task.LoadEtlTask;
 import com.baidu.palo.thrift.BackendService;
@@ -75,8 +72,6 @@ import org.apache.logging.log4j.Logger;
 import org.apache.thrift.TException;
 import org.apache.thrift.transport.TTransportException;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -97,16 +92,7 @@ public class Coordinator {
     private static final Logger LOG = LogManager.getLogger(Coordinator.class);
     private static final DateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
-    private static String localIP;
-
-    static {
-        try {
-            localIP = InetAddress.getLocalHost().getHostAddress().toString();
-        } catch (UnknownHostException e) {
-            LOG.warn(DebugUtil.getStackTrace(e));
-            localIP = "127.0.0.1";
-        }
-    }
+    private static String localIP = FrontendOptions.getLocalHostAddress();
 
     // Overall status of the entire query; set to the first reported fragment error
     // status or to CANCELLED, if Cancel() is called.
@@ -178,6 +164,7 @@ public class Coordinator {
     private TResourceInfo tResourceInfo;
     private boolean needReport;
 
+    private String clusterName;
 
     // Used for query
     public Coordinator(ConnectContext context, Analyzer analyzer, Planner planner) {
@@ -192,11 +179,12 @@ public class Coordinator {
         this.tResourceInfo = new TResourceInfo(context.getUser(),
                 context.getSessionVariable().getResourceGroup());
         this.needReport = context.getSessionVariable().isReportSucc();
+        this.clusterName = context.getClusterName();
     }
 
     // Used for pull load task coordinator
     public Coordinator(TUniqueId queryId, DescriptorTable descTable,
-                       List<PlanFragment> fragments, List<ScanNode> scanNodes) {
+                       List<PlanFragment> fragments, List<ScanNode> scanNodes, String cluster) {
         this.isBlockQuery = true;
         this.queryId = queryId;
         this.descTable = descTable.toThrift();
@@ -206,6 +194,7 @@ public class Coordinator {
         this.queryGlobals.setNow_string(DATE_FORMAT.format(new Date()));
         this.tResourceInfo = new TResourceInfo("", "");
         this.needReport = true;
+        this.clusterName = cluster;
     }
 
     public TUniqueId getQueryId() {
@@ -236,6 +225,14 @@ public class Coordinator {
         return trackingUrl;
     }
 
+    public void setExecMemoryLimit(long execMemoryLimit) {
+        this.queryOptions.setMem_limit(execMemoryLimit);
+    }
+
+    public void setTimeout(int timeout) {
+        this.queryOptions.setQuery_timeout(timeout);
+    }
+
     // Initiate
     private void prepare() {
         for (PlanFragment fragment : fragments) {
@@ -255,7 +252,7 @@ public class Coordinator {
             queryProfile.addChild(fragmentProfile.get(i));
         }
 
-        this.idToBackend = Catalog.getCurrentSystemInfo().getIdToBackend();
+        this.idToBackend = Catalog.getCurrentSystemInfo().getBackendsInCluster(clusterName);
         if (LOG.isDebugEnabled()) {
             LOG.debug("idToBackend size={}", idToBackend.size());
             for (Map.Entry<Long, Backend> entry : idToBackend.entrySet()) {
@@ -774,10 +771,11 @@ public class Coordinator {
     // Returns the id of the leftmost node of any of the gives types in 'plan_root',
     // or INVALID_PLAN_NODE_ID if no such node present.
     private PlanNode findLeftmostNode(PlanNode plan) {
-        while (plan.getChildren().size() != 0) {
-            plan = plan.getChild(0);
+        PlanNode newPlan = plan;
+        while (newPlan.getChildren().size() != 0) {
+            newPlan = newPlan.getChild(0);
         }
-        return plan;
+        return newPlan;
     }
 
     private <K, V> V findOrInsert(HashMap<K, V> m, final K key, final V defaultVal) {
@@ -1029,7 +1027,7 @@ public class Coordinator {
             this.addressToBackendID = addressToBackendID;
         }
 
-        public TNetworkAddress getBackendAddress() {
+        public final TNetworkAddress getBackendAddress() {
             return fragmentExecParams.get(fragmentId).hosts.get(instanceId);
         }
 
@@ -1125,6 +1123,7 @@ public class Coordinator {
         List<TExecPlanFragmentParams> toThrift(int backendNum) {
             List<TExecPlanFragmentParams> paramsList = Lists.newArrayList();
 
+            int tmpBackendNum = backendNum;
             for (int i = 0; i < instanceIds.size(); ++i) {
                 TExecPlanFragmentParams params = new TExecPlanFragmentParams();
                 params.setProtocol_version(PaloInternalServiceVersion.V1);
@@ -1146,7 +1145,7 @@ public class Coordinator {
                 params.params.setDestinations(destinations);
                 params.params.setSender_id(i);
                 params.setCoord(coordAddress);
-                params.setBackend_num(backendNum++);
+                params.setBackend_num(tmpBackendNum++);
                 params.setQuery_globals(queryGlobals);
                 params.setQuery_options(queryOptions);
 

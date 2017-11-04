@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -32,13 +28,16 @@ import com.baidu.palo.http.action.SystemAction;
 import com.baidu.palo.http.action.VariableAction;
 import com.baidu.palo.http.meta.MetaService.CheckAction;
 import com.baidu.palo.http.meta.MetaService.DumpAction;
-import com.baidu.palo.http.meta.MetaService.EditsAction;
 import com.baidu.palo.http.meta.MetaService.ImageAction;
 import com.baidu.palo.http.meta.MetaService.InfoAction;
 import com.baidu.palo.http.meta.MetaService.JournalIdAction;
 import com.baidu.palo.http.meta.MetaService.PutAction;
 import com.baidu.palo.http.meta.MetaService.RoleAction;
 import com.baidu.palo.http.meta.MetaService.VersionAction;
+import com.baidu.palo.http.rest.AddApacheHdfsBrokerAction;
+import com.baidu.palo.http.rest.AddBackendAction;
+import com.baidu.palo.http.rest.AddFrontendAction;
+import com.baidu.palo.http.rest.BootstrapFinishAction;
 import com.baidu.palo.http.rest.CheckDecommissionAction;
 import com.baidu.palo.http.rest.GetDdlStmtAction;
 import com.baidu.palo.http.rest.GetLoadInfoAction;
@@ -63,6 +62,11 @@ import com.baidu.palo.http.rest.ShowRuntimeInfoAction;
 import com.baidu.palo.master.MetaHelper;
 import com.baidu.palo.qe.QeService;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.io.File;
+
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
@@ -74,20 +78,15 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.stream.ChunkedWriteHandler;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
-import java.io.File;
-
 public class HttpServer {
     private static final Logger LOG = LogManager.getLogger(HttpServer.class);
     private static final int BACKLOG_NUM = 128;
     private QeService qeService = null;
     private int port;
     private ActionController controller;
-    
+
     private Thread serverThread;
-    
+
     public HttpServer(QeService qeService, int port) {
         this.qeService = qeService;
         this.port = port;
@@ -97,7 +96,7 @@ public class HttpServer {
     public void setup() throws IllegalArgException {
         registerActions();
     }
-    
+
     private void registerActions() throws IllegalArgException {
         // add rest action
         LoadAction.registerAction(controller);
@@ -106,7 +105,7 @@ public class HttpServer {
         SetConfigAction.registerAction(controller);
         GetDdlStmtAction.registerAction(controller);
         MigrationAction.registerAction(controller);
-        
+
         // add web action
         IndexAction.registerAction(controller);
         SystemAction.registerAction(controller);
@@ -142,7 +141,6 @@ public class HttpServer {
         // meta service action
         File imageDir = MetaHelper.getMasterImageDir();
         ImageAction.registerAction(controller, imageDir);
-        EditsAction.registerAction(controller, imageDir);
         InfoAction.registerAction(controller, imageDir);
         VersionAction.registerAction(controller, imageDir);
         PutAction.registerAction(controller, imageDir);
@@ -150,13 +148,20 @@ public class HttpServer {
         CheckAction.registerAction(controller, imageDir);
         DumpAction.registerAction(controller, imageDir);
         RoleAction.registerAction(controller, imageDir);
+
+        // add frontend backend broker action
+        AddBackendAction.registerAction(controller);
+        AddFrontendAction.registerAction(controller);
+        AddApacheHdfsBrokerAction.registerAction(controller);
+
+        BootstrapFinishAction.registerAction(controller);
     }
-    
+
     public void start() {
         serverThread = new Thread(new HttpServerThread(), "FE Http Server");
         serverThread.start();
     }
-    
+
     protected class PaloHttpServerInitializer extends ChannelInitializer<SocketChannel> {
         @Override
         protected void initChannel(SocketChannel ch) throws Exception {
@@ -166,7 +171,7 @@ public class HttpServer {
             ch.pipeline().addLast(new HttpServerHandler(controller, qeService));
         }
     }
-    
+
     private class HttpServerThread implements Runnable {
         @Override
         public void run() {
@@ -190,7 +195,7 @@ public class HttpServer {
             }
         }
     }
-    
+
     public static void main(String[] args) throws Exception {
         QeService qeService = new QeService(9030);
         HttpServer httpServer = new HttpServer(qeService, 8080);
@@ -198,7 +203,7 @@ public class HttpServer {
         System.out.println("before start http server.");
         httpServer.start();
         System.out.println("after start http server.");
-        
+
         while (true) {
             Thread.sleep(2000);
         }

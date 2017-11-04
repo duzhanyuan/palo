@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -35,8 +31,8 @@ import com.baidu.palo.qe.ShowResultSetMetaData;
 
 import com.google.common.base.Strings;
 
-import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -119,10 +115,10 @@ public class ShowLoadStmt extends ShowStmt {
                 ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR);
             }
         } else {
-            dbName = ClusterNamespace.getDbFullName(getClusterName(), dbName);
+            dbName = ClusterNamespace.getFullName(getClusterName(), dbName);
         }
-        final String userNameWithoutPrefix = ClusterNamespace.getUsrNameFromFullName(dbName);
-        final String dbNameWithoutPrefix = ClusterNamespace.getDbNameFromFullName(dbName);
+        final String userNameWithoutPrefix = ClusterNamespace.getNameFromFullName(dbName);
+        final String dbNameWithoutPrefix = ClusterNamespace.getNameFromFullName(dbName);
         // check access
         if (!analyzer.getCatalog().getUserMgr().checkAccess(analyzer.getUser(), dbName, AccessPrivilege.READ_ONLY)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_DB_ACCESS_DENIED, userNameWithoutPrefix,
@@ -160,31 +156,36 @@ public class ShowLoadStmt extends ShowStmt {
     }
 
     private void analyzeSubPredicate(Expr subExpr) throws AnalysisException {
+        if (subExpr == null) {
+            return;
+        }
+
         boolean valid = true;
         boolean hasLabel = false;
         boolean hasState = false;
-        while (subExpr != null) {
+
+        CHECK: {
             if (subExpr instanceof BinaryPredicate) {
                 BinaryPredicate binaryPredicate = (BinaryPredicate) subExpr;
                 if (binaryPredicate.getOp() != Operator.EQ) {
                     valid = false;
-                    break;
+                    break CHECK;
                 }
             } else if (subExpr instanceof LikePredicate) {
                 LikePredicate likePredicate = (LikePredicate) subExpr;
                 if (likePredicate.getOp() != LikePredicate.Operator.LIKE) {
                     valid = false;
-                    break;
+                    break CHECK;
                 }
             } else {
                 valid = false;
-                break;
+                break CHECK;
             }
 
             // left child
             if (!(subExpr.getChild(0) instanceof SlotRef)) {
                 valid = false;
-                break;
+                break CHECK;
             }
             String leftKey = ((SlotRef) subExpr.getChild(0)).getColumnName();
             if (leftKey.equalsIgnoreCase("label")) {
@@ -193,12 +194,12 @@ public class ShowLoadStmt extends ShowStmt {
                 hasState = true;
             } else {
                 valid = false;
-                break;
+                break CHECK;
             }
 
             if (hasState && !(subExpr instanceof BinaryPredicate)) {
                 valid = false;
-                break;
+                break CHECK;
             }
 
             if (hasLabel && subExpr instanceof BinaryPredicate) {
@@ -208,13 +209,13 @@ public class ShowLoadStmt extends ShowStmt {
             // right child
             if (!(subExpr.getChild(1) instanceof StringLiteral)) {
                 valid = false;
-                break;
+                break CHECK;
             }
 
             String value = ((StringLiteral) subExpr.getChild(1)).getStringValue();
             if (Strings.isNullOrEmpty(value)) {
                 valid = false;
-                break;
+                break CHECK;
             }
 
             if (hasLabel) {
@@ -226,11 +227,9 @@ public class ShowLoadStmt extends ShowStmt {
                     JobState.valueOf(stateValue);
                 } catch (Exception e) {
                     valid = false;
-                    break;
+                    break CHECK;
                 }
             }
-
-            break;
         }
 
         if (!valid) {

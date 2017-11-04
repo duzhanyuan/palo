@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -34,15 +30,6 @@
 #include "olap/utils.h"
 
 namespace palo {
-
-const uint32_t DOWNLOAD_FILE_MAX_RETRY = 3;
-const uint32_t TASK_FINISH_MAX_RETRY = 3;
-const uint32_t PUSH_MAX_RETRY = 1;
-const uint32_t REPORT_TASK_WORKER_COUNT = 1;
-const uint32_t REPORT_DISK_STATE_WORKER_COUNT = 1;
-const uint32_t REPORT_OLAP_TABLE_WORKER_COUNT = 1;
-const uint32_t LIST_REMOTE_FILE_TIMEOUT = 15;
-const std::string HTTP_REQUEST_PREFIX = "/api/_tablet/_download?file=";
 
 class TaskWorkerPool {
 public:

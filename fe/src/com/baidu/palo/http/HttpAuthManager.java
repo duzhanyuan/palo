@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -26,35 +22,32 @@ import java.util.concurrent.TimeUnit;
 
 // We simulate a simplified session here: only store user-name of clients who already logged in,
 // and we only have a default admin user for now.
-public class HttpAuthManager {
+public final class HttpAuthManager {
     private static long SESSION_EXPIRE_TIME = 2; // hour
-    private static long SESSION_MAX_SIZe = 100; // avoid to store too many
-    
-    private static HttpAuthManager instance = null;
+    private static long SESSION_MAX_SIZE = 100; // avoid to store too many
+
+    private static HttpAuthManager instance = new HttpAuthManager();
 
     // session_id => username
     private Cache<String, String> authSessions =  CacheBuilder.newBuilder()
-            .maximumSize(SESSION_MAX_SIZe)
+            .maximumSize(SESSION_MAX_SIZE)
             .expireAfterAccess(SESSION_EXPIRE_TIME, TimeUnit.HOURS)
             .build();
-    
+
     private HttpAuthManager() {
         // do nothing
     }
-    
+
     public static HttpAuthManager getInstance() {
-        if (instance == null) {
-            instance = new HttpAuthManager();
-        }
         return instance;
     }
-    
+
     public String getUsername(String sessionId) {
         String username = null;
         username = authSessions.getIfPresent(sessionId);
         return username;
     }
-    
+
     public void addClient(String key, String value) {
         authSessions.put(key, value);
     }

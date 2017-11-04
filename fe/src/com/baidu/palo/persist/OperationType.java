@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -101,11 +97,12 @@ public class OperationType {
 
     public static final short OP_CREATE_CLUSTER = 74;
     public static final short OP_DROP_CLUSTER = 75;
-    public static final short OP_MODIFY_CLUSTER = 76;
+    public static final short OP_EXPAND_CLUSTER = 76;
     public static final short OP_MIGRATE_CLUSTER = 77;
     public static final short OP_LINK_CLUSTER = 78;
     public static final short OP_ENTER_CLUSTER = 79;
     public static final short OP_SHOW_CLUSTERS = 80;
+    @Deprecated
     public static final short OP_UPDATE_CLUSTER = 81;
     public static final short OP_UPDATE_DB = 82;
     public static final short OP_DROP_LINKDB = 83;
@@ -113,4 +110,6 @@ public class OperationType {
     public static final short OP_ADD_BROKER = 85;
     public static final short OP_DROP_BROKER = 86;
     public static final short OP_DROP_ALL_BROKER = 87;
+
+    public static final short OP_UPDATE_CLUSTER_AND_BACKENDS = 88;
 }

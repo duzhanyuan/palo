@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -175,7 +171,7 @@ public class EditLog {
                         break;
                     }
                     LOG.info("Begin to unprotect drop table. db = "
-                            + db.getName() + " table = " + info.getTableId());
+                            + db.getFullName() + " table = " + info.getTableId());
                     catalog.replayDropTable(db, info.getTableId());
                     break;
                 }
@@ -407,7 +403,7 @@ public class EditLog {
                 case OperationType.OP_ADD_FIRST_FRONTEND:
                 case OperationType.OP_ADD_FRONTEND: {
                     Frontend fe = (Frontend) journal.getData();
-                    catalog.replayAddFrontend(fe);
+                    catalog.addFrontendWithCheck(fe);
                     break;
                 }
                 case OperationType.OP_REMOVE_FRONTEND: {
@@ -470,14 +466,9 @@ public class EditLog {
                     catalog.replayDropCluster(value);
                     break;
                 }
-                case OperationType.OP_UPDATE_CLUSTER: {
-                    final ClusterInfo value = (ClusterInfo) journal.getData();
-                    catalog.replayUpdateCluster(value);
-                    break;
-                }
-                case OperationType.OP_MODIFY_CLUSTER: {
-                    final ClusterInfo value = (ClusterInfo) journal.getData();
-                    catalog.replayUpdateCluster(value);
+                case OperationType.OP_EXPAND_CLUSTER: {
+                    final ClusterInfo info = (ClusterInfo) journal.getData();
+                    catalog.replayExpandCluster(info);
                     break;
                 }
                 case OperationType.OP_LINK_CLUSTER: {
@@ -518,6 +509,11 @@ public class EditLog {
                 case OperationType.OP_SET_LOAD_ERROR_URL: {
                     final LoadErrorHub.Param param = (LoadErrorHub.Param) journal.getData();
                     catalog.getLoadInstance().setLoadErrorHubInfo(param);
+                    break;
+                }
+                case OperationType.OP_UPDATE_CLUSTER_AND_BACKENDS: {
+                    final BackendIdsUpdateInfo info = (BackendIdsUpdateInfo) journal.getData();
+                    catalog.replayUpdateClusterAndBackends(info);
                     break;
                 }
                 default: {
@@ -848,8 +844,8 @@ public class EditLog {
         logEdit(OperationType.OP_UPDATE_DB, new Text(info));
     }
 
-    public void logModifyCluster(ClusterInfo ci) {
-        logEdit(OperationType.OP_MODIFY_CLUSTER, ci);
+    public void logExpandCluster(ClusterInfo ci) {
+        logEdit(OperationType.OP_EXPAND_CLUSTER, ci);
     }
 
     public void logLinkCluster(BaseParam param) {
@@ -858,10 +854,6 @@ public class EditLog {
 
     public void logMigrateCluster(BaseParam param) {
         logEdit(OperationType.OP_MIGRATE_CLUSTER, param);
-    }
-
-    public void logUpdateCluster(ClusterInfo info) {
-        logEdit(OperationType.OP_UPDATE_CLUSTER, info);
     }
 
     public void logDropLinkDb(DropLinkDbAndUpdateDbInfo info) {
@@ -892,4 +884,9 @@ public class EditLog {
         ExportJob.StateTransfer transfer = new ExportJob.StateTransfer(jobId, newState);
         logEdit(OperationType.OP_EXPORT_UPDATE_STATE, transfer);
     }
+
+    public void logUpdateClusterAndBackendState(BackendIdsUpdateInfo info) {
+        logEdit(OperationType.OP_UPDATE_CLUSTER_AND_BACKENDS, info);
+    }
+    
 }

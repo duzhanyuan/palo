@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -23,6 +19,7 @@ import com.baidu.palo.analysis.DescribeStmt;
 import com.baidu.palo.analysis.HelpStmt;
 import com.baidu.palo.analysis.ShowAlterStmt;
 import com.baidu.palo.analysis.ShowAuthorStmt;
+import com.baidu.palo.analysis.ShowBackendsStmt;
 import com.baidu.palo.analysis.ShowBackupStmt;
 import com.baidu.palo.analysis.ShowBrokerStmt;
 import com.baidu.palo.analysis.ShowClusterStmt;
@@ -90,6 +87,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Iterator;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -170,6 +168,8 @@ public class ShowExecutor {
             handleShowBroker();
         } else if (stmt instanceof ShowExportStmt) {
             handleShowExport();
+        } else if (stmt instanceof ShowBackendsStmt) {
+            handleShowBackends();
         } else {
             handleEmtpy();
         }
@@ -309,7 +309,7 @@ public class ShowExecutor {
         UserPropertyMgr userPropertyMgr = ctx.getCatalog().getUserMgr();
         Set<String> dbNameSet = Sets.newTreeSet();
         for (String fullName : dbNames) {
-            final String db = ClusterNamespace.getDbNameFromFullName(fullName);
+            final String db = ClusterNamespace.getNameFromFullName(fullName);
             // Filter dbname
             if (matcher != null && !matcher.match(db)) {
                 continue;
@@ -415,8 +415,8 @@ public class ShowExecutor {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_BAD_DB_ERROR, showStmt.getDb());
         }
         StringBuilder sb = new StringBuilder();
-        sb.append("CREATE DATABASE `").append(ClusterNamespace.getDbNameFromFullName(showStmt.getDb())).append("`");
-        rows.add(Lists.newArrayList(ClusterNamespace.getDbNameFromFullName(showStmt.getDb()), sb.toString()));
+        sb.append("CREATE DATABASE `").append(ClusterNamespace.getNameFromFullName(showStmt.getDb())).append("`");
+        rows.add(Lists.newArrayList(ClusterNamespace.getNameFromFullName(showStmt.getDb()), sb.toString()));
         resultSet = new ShowResultSet(showStmt.getMetaData(), rows);
     }
 
@@ -764,7 +764,7 @@ public class ShowExecutor {
                     isSync = false;
                     break;
                 }
-                dbName = db.getName();
+                dbName = db.getFullName();
 
                 db.readLock();
                 try {
@@ -897,4 +897,11 @@ public class ShowExecutor {
 
         resultSet = new ShowResultSet(showExportStmt.getMetaData(), rows);
     }
+
+    private void handleShowBackends() {
+        final ShowBackendsStmt showStmt = (ShowBackendsStmt) stmt;
+        final List<List<String>> backendInfos = BackendsProcDir.getClusterBackendInfos(showStmt.getClusterName());
+        resultSet = new ShowResultSet(showStmt.getMetaData(), backendInfos);
+    }
+
 }

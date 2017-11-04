@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -47,13 +43,14 @@ public class BrokerBootstrap {
             System.setProperty("BROKER_LOG_DIR", System.getenv("BROKER_LOG_DIR"));
             PropertyConfigurator.configure(brokerHome + "/conf/log4j.properties");
             Logger logger = Logger.getLogger(BrokerBootstrap.class);
-            logger.debug("starting apache hdfs broker....");
+            logger.info("starting apache hdfs broker....");
             new BrokerConfig().init(brokerHome + "/conf/apache_hdfs_broker.conf");
 
             TProcessor tprocessor = new TPaloBrokerService.Processor<TPaloBrokerService.Iface>(
                     new HDFSBrokerServiceImpl());
             ThriftServer server = new ThriftServer(BrokerConfig.broker_ipc_port, tprocessor);
             server.start();
+            logger.info("starting apache hdfs broker....succeed");
             while (true) {
                 Thread.sleep(2000);
             }

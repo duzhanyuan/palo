@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -333,8 +329,7 @@ public class Clone {
             // remove clone task
             AgentTaskQueue.removeTask(job.getDestBackendId(), TTaskType.CLONE, job.getTabletId());
 
-            // remove from inverted index
-            // Catalog.getCurrentInvertedIndex().deleteReplica(job.getTabletId(), job.getDestBackendId());
+            // the cloned replica will be removed from meta when we remove clone job
 
             // update job state
             job.setState(JobState.CANCELLED);
@@ -410,6 +405,8 @@ public class Clone {
         long indexId = task.getIndexId();
         long backendId = task.getBackendId();
         int schemaHash = task.getSchemaHash();
+        long taskVersion = task.getCommittedVersion();
+        long taskVersionHash = task.getCommittedVersionHash();
         Database db = Catalog.getInstance().getDb(dbId);
         if (db == null) {
             String failMsg = "db does not exist. id: " + dbId;
@@ -448,23 +445,24 @@ public class Clone {
                         + ", backend id: " + backendId);
             }
             
-            // long committedVersion = partition.getCommittedVersion();
-            // long committedVersionHash = partition.getCommittedVersionHash();
+            // Here we do not check is clone version is equal to the commited version.
+            // Because in case of high frequency loading, clone version always lags behind the commited version,
+            // so the clone job will never succeed, which cause accumulation of quorum finished load jobs.
+
+            // But we will check if the cloned replica's version is larger than or equal to the task's version.
+            // We should dicard the cloned replica with stale version.
+            if (tabletInfo.getVersion() < taskVersion
+                    || (tabletInfo.getVersion() == taskVersion && tabletInfo.getVersion_hash() != taskVersionHash)) {
+                throw new MetaNotFoundException(String.format("cloned replica's version info is stale. %ld-%ld,"
+                                                        + " expected: %ld-%ld",
+                                                              tabletInfo.getVersion(), tabletInfo.getVersion_hash(),
+                                                              taskVersion, taskVersionHash));
+            }
+
             long version = tabletInfo.getVersion();
             long versionHash = tabletInfo.getVersion_hash();
             long rowCount = tabletInfo.getRow_count();
             long dataSize = tabletInfo.getData_size();
-
-            //            if ((version == committedVersion && versionHash != committedVersionHash) 
-            //                    || version < committedVersion) {
-            //                String failMsg = "clone replica version error"
-            //                        + ". version: " + version 
-            //                        + ", version hash: " + versionHash
-            //                        + ", committed version: " + committedVersion 
-            //                        + ", committed version hash: " + committedVersionHash;
-            //                cancelCloneJob(job, failMsg);
-            //                return;
-            //            }
 
             writeLock();
             try {

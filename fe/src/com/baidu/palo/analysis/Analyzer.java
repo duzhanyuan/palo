@@ -26,15 +26,13 @@ import com.baidu.palo.catalog.Column;
 import com.baidu.palo.catalog.Database;
 import com.baidu.palo.catalog.InfoSchemaDb;
 import com.baidu.palo.catalog.Table;
-import com.baidu.palo.cluster.ClusterNamespace;
 import com.baidu.palo.catalog.Type;
 import com.baidu.palo.catalog.View;
+import com.baidu.palo.cluster.ClusterNamespace;
 import com.baidu.palo.common.AnalysisException;
 import com.baidu.palo.common.ErrorCode;
 import com.baidu.palo.common.ErrorReport;
 import com.baidu.palo.common.IdGenerator;
-import com.baidu.palo.common.InternalException;
-import com.baidu.palo.common.Reference;
 import com.baidu.palo.planner.PlanNode;
 import com.baidu.palo.qe.ConnectContext;
 import com.baidu.palo.rewrite.BetweenToCompoundRule;
@@ -60,6 +58,7 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -452,7 +451,7 @@ public class Analyzer {
         if (Strings.isNullOrEmpty(dbName)) {
             dbName = getDefaultDb();
         } else {
-            dbName = ClusterNamespace.getDbFullName(getClusterName(), tableName.getDb());
+            dbName = ClusterNamespace.getFullName(getClusterName(), tableName.getDb());
         }
         if (Strings.isNullOrEmpty(dbName)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR);
@@ -468,7 +467,7 @@ public class Analyzer {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_BAD_TABLE_ERROR, tableName.getTbl());
         }
 
-        TableName tblName = new TableName(database.getName(), table.getName());
+        TableName tblName = new TableName(database.getFullName(), table.getName());
         if (table instanceof View) {
             return new InlineViewRef((View) table, tableRef);
         } else {
@@ -523,36 +522,33 @@ public class Analyzer {
      */
     public SlotDescriptor registerColumnRef(TableName tblName, String colName) throws AnalysisException {
         TupleDescriptor d;
-        if (tblName == null) {
+        TableName newTblName = tblName;
+        if (newTblName == null) {
             d = resolveColumnRef(colName);
         } else {
-            if (InfoSchemaDb.isInfoSchemaDb(tblName.getDb()) ||
-                    (tblName.getDb() == null && InfoSchemaDb.isInfoSchemaDb(getDefaultDb()))) {
-                tblName = new TableName(tblName.getDb(), tblName.getTbl().toLowerCase());
+            if (InfoSchemaDb.isInfoSchemaDb(newTblName.getDb())
+                    || (newTblName.getDb() == null && InfoSchemaDb.isInfoSchemaDb(getDefaultDb()))) {
+                newTblName = new TableName(newTblName.getDb(), newTblName.getTbl().toLowerCase());
             }
-            d = resolveColumnRef(tblName, colName);
+            d = resolveColumnRef(newTblName, colName);
         }
         if (d == null && hasAncestors() && isSubquery) {
             // analyzer father for subquery
-            if (tblName == null) {
+            if (newTblName == null) {
                 d = getParentAnalyzer().resolveColumnRef(colName);
             } else {
-                d = getParentAnalyzer().resolveColumnRef(tblName, colName);
+                d = getParentAnalyzer().resolveColumnRef(newTblName, colName);
             }
         }
         if (d == null) {
-            ErrorReport.reportAnalysisException(
-                    ErrorCode.ERR_BAD_FIELD_ERROR,
-                    colName,
-                    tblName == null ? "table list" : tblName.toString());
+            ErrorReport.reportAnalysisException(ErrorCode.ERR_BAD_FIELD_ERROR, colName,
+                                                newTblName == null ? "table list" : newTblName.toString());
         }
 
         Column col = d.getTable().getColumn(colName);
         if (col == null) {
-            ErrorReport.reportAnalysisException(
-                    ErrorCode.ERR_BAD_FIELD_ERROR,
-                    colName,
-                    tblName == null ? d.getTable().getName() : tblName.toString());
+            ErrorReport.reportAnalysisException(ErrorCode.ERR_BAD_FIELD_ERROR, colName,
+                                                newTblName == null ? d.getTable().getName() : newTblName.toString());
         }
 
         // Make column name case insensitive
@@ -732,15 +728,15 @@ public class Analyzer {
 
         e.setId(globalState.conjunctIdGenerator.getNextId());
         globalState.conjuncts.put(e.getId(), e);
+        
         // LOG.info("registered conjunct " + p.getId().toString() + ": " + p.toSql());
-
         ArrayList<TupleId> tupleIds = Lists.newArrayList();
         ArrayList<SlotId> slotIds = Lists.newArrayList();
         e.getIds(tupleIds, slotIds);
 
         // register full join conjuncts
         registerFullOuterJoinedConjunct(e);
-
+       
         // update tuplePredicates
         for (TupleId id : tupleIds) {
             if (!tuplePredicates.containsKey(id)) {
@@ -813,8 +809,8 @@ public class Analyzer {
         // create an eq predicate between lhs and rhs
         BinaryPredicate p = new BinaryPredicate(BinaryPredicate.Operator.EQ, lhs, rhs);
         p.setIsAuxExpr();
-        if (LOG.isTraceEnabled()) {
-            LOG.trace("register equiv predicate: " + p.toSql() + " " + p.debugString());
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("register equiv predicate: " + p.toSql() + " " + p.debugString());
         }
         registerConjunct(p);
     }
@@ -859,8 +855,10 @@ public class Analyzer {
     public List<Expr> getAllUnassignedConjuncts(List<TupleId> tupleIds) {
         List<Expr> result = Lists.newArrayList();
         for (Expr e : globalState.conjuncts.values()) {
-            if (e.isBoundByTupleIds(tupleIds) && !globalState.assignedConjuncts.contains(
-                    e.getId()) && !globalState.ojClauseByConjunct.containsKey(e.getId())) {
+            if (!e.isAuxExpr() 
+                && e.isBoundByTupleIds(tupleIds) 
+                && !globalState.assignedConjuncts.contains(e.getId()) 
+                && !globalState.ojClauseByConjunct.containsKey(e.getId())) {
                 result.add(e);
             }
         }
@@ -1267,8 +1265,10 @@ public class Analyzer {
             // TODO(zc)
             compatibleType = Type.getCmpType(compatibleType, exprs.get(i).getType());
         }
-        if (compatibleType == Type.VARCHAR && exprs.get(0).getType().isDateType()) {
-            compatibleType = Type.DATETIME;
+        if (compatibleType == Type.VARCHAR) {
+            if (exprs.get(0).getType().isDateType()) {
+                compatibleType = Type.DATETIME;
+            }
         }
         // Add implicit casts if necessary.
         for (int i = 0; i < exprs.size(); ++i) {
@@ -1414,7 +1414,7 @@ public class Analyzer {
         }
 
         if (e.isOnClauseConjunct()) {
-
+         
             if (isAntiJoinedConjunct(e)) return canEvalAntiJoinedConjunct(e, tupleIds);
             if (isIjConjunct(e) || isSjConjunct(e)) {
                 if (!containsOuterJoinedTid(tids)) return true;
@@ -1547,5 +1547,54 @@ public class Analyzer {
 
     public boolean containSubquery() {
         return globalState.containsSubquery;
+    }
+
+    /**
+     * Mark slots that are being referenced by the plan tree itself or by the outputExprs exprs as materialized. If the
+     * latter is null, mark all slots in planRoot's tupleIds() as being referenced. All aggregate slots are
+     * materialized.
+     * <p/>
+     * TODO: instead of materializing everything produced by the plan root, derived referenced slots from destination
+     * fragment and add a materialization node if not all output is needed by destination fragment TODO 2: should the
+     * materialization decision be cost-based?
+     */
+    public void markRefdSlots(Analyzer analyzer, PlanNode planRoot,
+                               List<Expr> outputExprs, AnalyticInfo analyticInfo) {
+        if (planRoot == null) {
+            return;
+        }
+        List<SlotId> refdIdList = Lists.newArrayList();
+        planRoot.getMaterializedIds(analyzer, refdIdList);
+        if (outputExprs != null) {
+            Expr.getIds(outputExprs, null, refdIdList);
+        }
+
+        HashSet<SlotId> refdIds = Sets.newHashSet(refdIdList);
+        for (TupleDescriptor tupleDesc : analyzer.getDescTbl().getTupleDescs()) {
+            for (SlotDescriptor slotDesc : tupleDesc.getSlots()) {
+                if (refdIds.contains(slotDesc.getId())) {
+                    slotDesc.setIsMaterialized(true);
+                }
+            }
+        }
+        if (analyticInfo != null) {
+            ArrayList<SlotDescriptor> list = analyticInfo.getOutputTupleDesc().getSlots();
+
+            for (SlotDescriptor slotDesc : list) {
+                if (refdIds.contains(slotDesc.getId())) {
+                    slotDesc.setIsMaterialized(true);
+                }
+            }
+        }
+        if (outputExprs == null) {
+            // mark all slots in planRoot.getTupleIds() as materialized
+            ArrayList<TupleId> tids = planRoot.getTupleIds();
+            for (TupleId tid : tids) {
+                TupleDescriptor tupleDesc = analyzer.getDescTbl().getTupleDesc(tid);
+                for (SlotDescriptor slotDesc : tupleDesc.getSlots()) {
+                    slotDesc.setIsMaterialized(true);
+                }
+            }
+        }
     }
 }

@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -63,22 +59,22 @@ public class PathBuilder implements Writable {
     }
 
     public static PathBuilder createPathBuilder(String path) throws IOException {
-        path = formatPath(path);
-        if (Strings.isNullOrEmpty(path)) {
-            throw new IOException("Invalid path: " + path);
+        String formattedPath = formatPath(path);
+        if (Strings.isNullOrEmpty(formattedPath)) {
+            throw new IOException("Invalid path: " + formattedPath);
         }
-        PathBuilder pathBuilder = new PathBuilder(path);
+        PathBuilder pathBuilder = new PathBuilder(formattedPath);
         File file = new File(pathBuilder.getRoot().getFullPath());
         if (file.exists()) {
-            LOG.warn("path[{}] dir already exist", path);
+            LOG.warn("path[{}] dir already exist", formattedPath);
         }
         return pathBuilder;
     }
 
     private static String formatPath(String path) {
-        path = path.replaceAll(" ", "");
-        path = path.replaceAll("/+", "/");
-        return path;
+        String formattedPath = path.replaceAll(" ", "");
+        formattedPath = formattedPath.replaceAll("/+", "/");
+        return formattedPath;
     }
 
     public DirSaver getRoot() {

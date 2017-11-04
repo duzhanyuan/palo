@@ -1,13 +1,8 @@
-
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -53,10 +48,11 @@ import com.google.common.collect.Sets;
  */
 public class Cluster implements Writable {
     private static final Logger LOG = LogManager.getLogger(Cluster.class);
+
     private Long id;
     private String name;
     // backend which cluster own
-    private List<Long> backendIdList;
+    private Set<Long> backendIdSet;
 
     private Set<Long> userIdSet;
     private Set<String> userNameSet;
@@ -71,7 +67,7 @@ public class Cluster implements Writable {
 
     public Cluster() {
         this.rwLock = new ReentrantReadWriteLock(true);
-        this.backendIdList = new LinkedList<Long>();
+        this.backendIdSet = Sets.newHashSet();
         this.userIdSet = Sets.newHashSet();
         this.userNameSet = Sets.newHashSet();
         this.linkDbNames = Maps.newHashMap();
@@ -84,7 +80,7 @@ public class Cluster implements Writable {
         this.name = name;
         this.id = id;
         this.rwLock = new ReentrantReadWriteLock(true);
-        this.backendIdList = new LinkedList<Long>();
+        this.backendIdSet = Sets.newHashSet();
         this.userIdSet = Sets.newHashSet();
         this.userNameSet = Sets.newHashSet();
         this.linkDbNames = Maps.newHashMap();
@@ -235,36 +231,39 @@ public class Cluster implements Writable {
     }
 
     public int getClusterCapacity() {
-        return backendIdList.size();
+        return backendIdSet.size();
     }
 
     public List<Long> getBackendIdList() {
-        return Lists.newArrayList(backendIdList);
+        return Lists.newArrayList(backendIdSet);
     }
 
     public void setBackendIdList(List<Long> backendIdList) {
+        if (backendIdList == null) {
+            return;
+        }
         writeLock();
         try {
-            this.backendIdList = backendIdList;
+            this.backendIdSet = Sets.newHashSet(backendIdList);
         } finally {
             writeUnlock();
         }
     }
 
-    public void addBackend(long id) {
+    public void addBackend(long backendId) {
         writeLock();
         try {
-            this.backendIdList.add(id);
+            this.backendIdSet.add(backendId);
         } finally {
             writeUnlock();
         }
     }
 
-    public void addBackends(List<Long> backends) {
+    public void addBackends(List<Long> backendIds) {
         writeLock();
         try {
-            this.backendIdList.addAll(backends);
-        } finally {
+            this.backendIdSet.addAll(backendIds);
+       } finally {
             writeUnlock();
         }
     }
@@ -290,19 +289,19 @@ public class Cluster implements Writable {
         out.writeLong(id);
         Text.writeString(out, name);
 
-        out.writeLong(backendIdList.size());
-        for (Long id : backendIdList) {
+        out.writeLong(backendIdSet.size());
+        for (Long id : backendIdSet) {
             out.writeLong(id);
         }
 
         int dbCount = dbIds.size();
-        if (dbNames.contains(ClusterNamespace.getDbFullName(this.name, InfoSchemaDb.getDatabaseName()))) {
+        if (dbNames.contains(ClusterNamespace.getFullName(this.name, InfoSchemaDb.DATABASE_NAME))) {
             dbCount--;
         }
 
         out.writeInt(dbCount);
         for (String name : dbNames) {
-            if (!name.equals(ClusterNamespace.getDbFullName(this.name, InfoSchemaDb.getDatabaseName()))) {
+            if (!name.equals(ClusterNamespace.getFullName(this.name, InfoSchemaDb.DATABASE_NAME))) {
                 Text.writeString(out, name);
             }
         }
@@ -334,9 +333,8 @@ public class Cluster implements Writable {
         Long len = in.readLong();
         while (len-- > 0) {
             Long id = in.readLong();
-            backendIdList.add(id);
+            backendIdSet.add(id);
         }
-
         int count = in.readInt();
         while (count-- > 0) {
             dbNames.add(Text.readString(in));
@@ -364,21 +362,22 @@ public class Cluster implements Writable {
         }
     }
     
-    public void removeBackend(long id) {
+    public void removeBackend(long removedBackendId) {
         writeLock();
         try {
-            backendIdList.remove(id);
+            backendIdSet.remove((Long)removedBackendId);
         } finally {
             writeUnlock();
         }
     }
     
-    public void removeBackends(List<Long> list) {
+    public void removeBackends(List<Long> removedBackendIds) {
         writeLock();
         try {
-            backendIdList.remove(list);
+            backendIdSet.remove(removedBackendIds);
         } finally {
             writeUnlock();
         }
     }
+
 }

@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -20,7 +16,7 @@
 package com.baidu.palo.alter;
 
 import com.baidu.palo.alter.AlterJob.JobState;
-import com.baidu.palo.alter.DecommissionBackendJob.DecomissionType;
+import com.baidu.palo.alter.DecommissionBackendJob.DecommissionType;
 import com.baidu.palo.analysis.AddBackendClause;
 import com.baidu.palo.analysis.AddObserverClause;
 import com.baidu.palo.analysis.AddFollowerClause;
@@ -51,6 +47,7 @@ import com.baidu.palo.task.AgentTask;
 import com.baidu.palo.thrift.TTabletInfo;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.apache.commons.lang.NotImplementedException;
@@ -142,27 +139,41 @@ public class SystemHandler extends AlterHandler {
 
     @Override
     // add synchronized to avoid process 2 or more stmt at same time
-    public synchronized void process(List<AlterClause> alterClauses, String clusterName, Database unuseDb,
-            OlapTable unuseTbl) throws DdlException {
+    public synchronized void process(List<AlterClause> alterClauses, String clusterName, Database dummyDb,
+            OlapTable dummyTbl) throws DdlException {
         Preconditions.checkArgument(alterClauses.size() == 1);
         AlterClause alterClause = alterClauses.get(0);
 
         if (alterClause instanceof AddBackendClause) {
             AddBackendClause addBackendClause = (AddBackendClause) alterClause;
-            Catalog.getCurrentSystemInfo().addBackends(addBackendClause.getHostPortPairs());
+            final String destClusterName = addBackendClause.getDestCluster();
+            
+            if (!Strings.isNullOrEmpty(destClusterName) 
+                    && Catalog.getInstance().getCluster(destClusterName) == null) {
+                throw new DdlException("Cluster: " + destClusterName + " does not exist.");
+            }
+            Catalog.getCurrentSystemInfo().addBackends(addBackendClause.getHostPortPairs(), 
+                addBackendClause.isFree(), addBackendClause.getDestCluster());
         } else if (alterClause instanceof DropBackendClause) {
             DropBackendClause dropBackendClause = (DropBackendClause) alterClause;
+            if (!dropBackendClause.isForce()) {
+                throw new DdlException("It is highly NOT RECOMMENDED to use DROP BACKEND stmt."
+                        + "It is not safe to directly drop a backend. "
+                        + "All data on this backend will be discarded permanently. "
+                        + "If you insist, use DROPP BACKEND stmt (double P).");
+            }
             Catalog.getCurrentSystemInfo().dropBackends(dropBackendClause.getHostPortPairs());
         } else if (alterClause instanceof DecommissionBackendClause) {
             DecommissionBackendClause decommissionBackendClause = (DecommissionBackendClause) alterClause;
 
             // check request
+            // clusterName -> (beId -> backend)
             Map<String, Map<Long, Backend>> clusterBackendsMap = checkDecommission(decommissionBackendClause);
 
             // set backend's state as 'decommissioned'
             for (Map<Long, Backend> backends : clusterBackendsMap.values()) {
                 for (Backend backend : backends.values()) {
-                    if (((DecommissionBackendClause) alterClause).getType() == DecomissionType.ClusterDecomission) {
+                    if (((DecommissionBackendClause) alterClause).getType() == DecommissionType.ClusterDecommission) {
                         backend.setBackendState(BackendState.offline);
                     }
                     backend.setDecommissioned(true);
@@ -174,12 +185,11 @@ public class SystemHandler extends AlterHandler {
             // add job
             long jobId = Catalog.getInstance().getNextId();
             DecommissionBackendJob decommissionBackendJob = new DecommissionBackendJob(jobId, clusterBackendsMap);
-            decommissionBackendJob.setDecomissionType(decommissionBackendClause.getType());
+            decommissionBackendJob.setDecommissionType(decommissionBackendClause.getType());
             addAlterJob(decommissionBackendJob);
 
             // log
             Catalog.getInstance().getEditLog().logStartDecommissionBackend(decommissionBackendJob);
-
             LOG.info("decommission backend job[{}] created. {}", jobId, decommissionBackendClause.toSql());
         } else if (alterClause instanceof AddObserverClause) {
             AddObserverClause clause = (AddObserverClause) alterClause;
@@ -216,8 +226,9 @@ public class SystemHandler extends AlterHandler {
 
         // in Multi-Tenancy , we will check decommission in every cluster
         // check if backend is under decommissioned
-        // Map<Long, Backend> backends = Maps.newHashMap();
-        final Map<String, Map<Long, Backend>> clusterBackendsMap = Maps.newHashMap();
+
+        // clusterName -> (beId -> backend)
+        final Map<String, Map<Long, Backend>> decommClusterBackendsMap = Maps.newHashMap();
         for (Pair<String, Integer> pair : hostPortPairs) {
             Backend backend = Catalog.getCurrentSystemInfo().getBackendWithHeartbeatPort(pair.first, pair.second);
 
@@ -225,42 +236,51 @@ public class SystemHandler extends AlterHandler {
                 // it's ok to resend decommission command. just log
                 LOG.info("backend[{}] is already under decommissioned.", backend.getHost());
             }
-            // backends.put(backend.getId(), backend);
-            Map<Long, Backend> backends = null;
-            if (!clusterBackendsMap.containsKey(backend.getOwnerClusterName())) {
+
+            Map<Long, Backend> backends = decommClusterBackendsMap.get(backend.getOwnerClusterName());
+            if (backends == null) {
                 backends = Maps.newHashMap();
-                clusterBackendsMap.put(backend.getOwnerClusterName(), backends);
-            } else {
-                backends = clusterBackendsMap.get(backend.getOwnerClusterName());
+                decommClusterBackendsMap.put(backend.getOwnerClusterName(), backends);
             }
             backends.put(backend.getId(), backend);
         }
 
-        for (String cluster : clusterBackendsMap.keySet()) {
-            // check available capacity for decommission
+        for (String clusterName : decommClusterBackendsMap.keySet()) {
+            // check available capacity for decommission.
+            // we need to make sure that there is enough space in this cluster
+            // to store the data from decommissioned backends.
             long totalAvailableCapacityB = 0L;
-            long totalUnavailableCapacityB = 0L;
+            long totalUnavailableCapacityB = 0L; // decommission + dead
             int availableBackendNum = 0;
-            final Map<Long, Backend> backendsInCluster = clusterBackendsMap.get(cluster);
-            final Map<Long, Backend> idToBackend = Catalog.getCurrentSystemInfo().getIdToBackend();
-            for (Entry<Long, Backend> entry : idToBackend.entrySet()) {
+            final Map<Long, Backend> decommBackendsInCluster = decommClusterBackendsMap.get(clusterName);
+
+            // get all backends in this cluster
+            final Map<Long, Backend> idToBackendsInCluster =
+                    Catalog.getCurrentSystemInfo().getBackendsInCluster(clusterName);
+            for (Entry<Long, Backend> entry : idToBackendsInCluster.entrySet()) {
                 long backendId = entry.getKey();
                 Backend backend = entry.getValue();
-                if (backendsInCluster.containsKey(backendId) || backend.isDecommissioned() || !backend.isAlive()) {
+                if (decommBackendsInCluster.containsKey(backendId)
+                        || backend.isDecommissioned()
+                        || !backend.isAlive()) {
                     totalUnavailableCapacityB += backend.getTotalCapacityB() - backend.getAvailableCapacityB();
                 } else {
                     ++availableBackendNum;
                     totalAvailableCapacityB += backend.getAvailableCapacityB();
                 }
             }
+
+            // space not enough
             if (totalAvailableCapacityB < totalUnavailableCapacityB) {
-                throw new DdlException("No available capacity for decommission");
+                throw new DdlException("No available capacity for decommission in cluster: " + clusterName);
             }
 
-            // check if meet replication number requirment
+            // backend num not enough
             if (availableBackendNum == 0) {
-                throw new DdlException("Too little available backend number");
+                throw new DdlException("Too little available backends: " + availableBackendNum);
             }
+
+            // check if meet replication number requirement
             List<String> dbNames = Catalog.getInstance().getDbNames();
             for (String dbName : dbNames) {
                 Database db = Catalog.getInstance().getDb(dbName);
@@ -280,7 +300,7 @@ public class SystemHandler extends AlterHandler {
                             if (availableBackendNum < replicationNum) {
                                 throw new DdlException("Table[" + table.getName() + "] in database[" + dbName
                                         + "] need more than " + replicationNum
-                                        + " available backends to meet replication requirement");
+                                        + " available backends to meet replication num requirement");
                             }
                         }
 
@@ -291,7 +311,7 @@ public class SystemHandler extends AlterHandler {
             }
         }
 
-        return clusterBackendsMap;
+        return decommClusterBackendsMap;
     }
 
     @Override

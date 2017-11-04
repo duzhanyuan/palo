@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -327,7 +323,7 @@ public class BackupJob extends AbstractBackupJob {
                 }
 
                 // 1. get table meta
-                getTableMeta(db.getName(), table, pathToWritables);
+                getTableMeta(db.getFullName(), table, pathToWritables);
 
                 if (table.getType() != TableType.OLAP) {
                     // this is not a OLAP table. just save table meta
@@ -345,7 +341,7 @@ public class BackupJob extends AbstractBackupJob {
                         return;
                     }
                 }
-                getRollupMeta(db.getName(), olapTable, pathToWritables);
+                getRollupMeta(db.getFullName(), olapTable, pathToWritables);
 
                 // 3. save partition meta
                 Collection<Long> partitionIds = tableIdToPartitionIds.get(tableId);
@@ -363,7 +359,7 @@ public class BackupJob extends AbstractBackupJob {
                         if (partition == null) {
                             throw new DdlException("partition[" + partitionId + "] does not exist");
                         }
-                        getPartitionMeta(db.getName(), olapTable, partition.getName(), pathToWritables);
+                        getPartitionMeta(db.getFullName(), olapTable, partition.getName(), pathToWritables);
 
                         // save version info
                         partitionIdToVersionInfo.put(partitionId,
@@ -599,7 +595,7 @@ public class BackupJob extends AbstractBackupJob {
         }
         db.readLock();
         try {
-            String dbName = db.getName();
+            String dbName = db.getFullName();
             for (Map.Entry<Long, Set<Long>> entry : tableIdToPartitionIds.entrySet()) {
                 long tableId = entry.getKey();
                 Set<Long> partitionIds = entry.getValue();

@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -21,6 +17,7 @@ package com.baidu.palo.catalog;
 
 import com.baidu.palo.analysis.SetUserPropertyVar;
 import com.baidu.palo.analysis.SetVar;
+import com.baidu.palo.cluster.ClusterNamespace;
 import com.baidu.palo.common.Config;
 import com.baidu.palo.common.DdlException;
 import com.baidu.palo.common.FeMetaVersion;
@@ -29,7 +26,6 @@ import com.baidu.palo.common.Pair;
 import com.baidu.palo.common.io.Text;
 import com.baidu.palo.common.io.Writable;
 import com.baidu.palo.load.DppConfig;
-import com.baidu.palo.cluster.ClusterNamespace;
 import com.baidu.palo.system.SystemInfoService;
 
 import com.google.common.collect.Lists;
@@ -61,19 +57,20 @@ public class UserProperty implements Writable {
     // for normal user
     public static final Set<Pattern> COMMON_PROPERTIES = Sets.newHashSet();
 
-     // 用户所属的cluster
+    // cluster which this user belongs to
     String clusterName;
-    // 此处保留UserName是为了便于序列化信息
+    // save redundantly to simplify serialization
     String userName;
-    // 用户的密码hash值，当前存储的是SHA1(SHA1('password'))
-    // 如果用户没有密码，这里存储的应该是byte[0]
+
+    // SHA1(SHA1('password')) of byte[0] is unset
     private byte[] password;
-    // 用户所拥有的数据库权限
+
+    // db- > priv
     private Map<String, AccessPrivilege> dbPrivMap;
-    // 用户是否是管理员
+
     private boolean isAdmin;
     private boolean isSuperuser = false;
-    // 用户最大连接数
+
     private long maxConn;
     // Resource belong to this user.
     private UserResource resource;
@@ -300,10 +297,11 @@ public class UserProperty implements Writable {
             return true;
         }
         // information_schema is case insensitive
-        if (db.equalsIgnoreCase(InfoSchemaDb.getDatabaseName())) {
-            db = InfoSchemaDb.getDatabaseName();
+        String tmpDb = db;
+        if (tmpDb.equalsIgnoreCase(InfoSchemaDb.DATABASE_NAME)) {
+            tmpDb = InfoSchemaDb.DATABASE_NAME;
         }
-        AccessPrivilege dbPriv = dbPrivMap.get(db);
+        AccessPrivilege dbPriv = dbPrivMap.get(tmpDb);
         if (dbPriv == null) {
             return false;
         }
@@ -334,19 +332,20 @@ public class UserProperty implements Writable {
     }
 
     public Pair<String, DppConfig> getClusterInfo(String cluster) {
-        if (cluster == null) {
-            cluster = defaultLoadCluster;
+        String tmpCluster = cluster;
+        if (tmpCluster == null) {
+            tmpCluster = defaultLoadCluster;
         }
 
         DppConfig dppConfig = null;
-        if (cluster != null) {
-            dppConfig = clusterToDppConfig.get(cluster);
+        if (tmpCluster != null) {
+            dppConfig = clusterToDppConfig.get(tmpCluster);
             if (dppConfig != null) {
                 dppConfig = dppConfig.getCopiedDppConfig();
             }
         }
 
-        return Pair.create(cluster, dppConfig);
+        return Pair.create(tmpCluster, dppConfig);
     }
 
     public List<List<String>> fetchProperty() {
@@ -478,7 +477,7 @@ public class UserProperty implements Writable {
     public void readFields(DataInput in) throws IOException {
         if (in.readBoolean()) {
             if (Catalog.getCurrentCatalogJournalVersion() < FeMetaVersion.VERSION_30) {
-                userName = ClusterNamespace.getUserFullName(SystemInfoService.DEFAULT_CLUSTER, Text.readString(in));
+                userName = ClusterNamespace.getFullName(SystemInfoService.DEFAULT_CLUSTER, Text.readString(in));
             } else {
                 userName = Text.readString(in);
             }
@@ -498,7 +497,7 @@ public class UserProperty implements Writable {
         for (int i = 0; i < numPriv; ++i) {
             String dbName;
             if (Catalog.getCurrentCatalogJournalVersion() < FeMetaVersion.VERSION_30) {
-                dbName = ClusterNamespace.getDbFullName(SystemInfoService.DEFAULT_CLUSTER, Text.readString(in));
+                dbName = ClusterNamespace.getFullName(SystemInfoService.DEFAULT_CLUSTER, Text.readString(in));
             } else {
                 dbName = Text.readString(in);
             }

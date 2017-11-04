@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -25,16 +21,17 @@ import com.baidu.palo.http.ActionController;
 import com.baidu.palo.http.BaseAction;
 import com.baidu.palo.http.BaseRequest;
 import com.baidu.palo.http.BaseResponse;
+import com.baidu.palo.http.UnauthorizedException;
 import com.baidu.palo.thrift.TNetworkAddress;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import io.netty.handler.codec.http.HttpHeaders;
-import io.netty.handler.codec.http.HttpResponseStatus;
-
 import java.net.URI;
 import java.net.URISyntaxException;
+
+import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpResponseStatus;
 
 public class RestBaseAction extends BaseAction {
     private static final Logger LOG = LogManager.getLogger(RestBaseAction.class);

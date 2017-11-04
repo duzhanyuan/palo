@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -45,13 +41,12 @@ public class IndexAction extends WebBaseAction {
         getPageFooter(response.getContent());
         writeResponse(request, response);
     }
-    
 
     private void appendVersionInfo(StringBuilder buffer) {
         buffer.append("<h2>Version</h2>");
-        buffer.append("<pre>version info");
+        buffer.append("<pre>version info<br/>");
         buffer.append("Version: " + Version.PALO_BUILD_VERSION + "<br/>");
-        buffer.append("Svn: " + Version.PALO_BUILD_HASH + "<br/>");
+        buffer.append("Git: " + Version.PALO_BUILD_HASH + "<br/>");
         buffer.append("Build Info: " + Version.PALO_BUILD_INFO + "<br/>");
         buffer.append("Build Time: " + Version.PALO_BUILD_TIME + "<br/>");
         buffer.append("</pre>");

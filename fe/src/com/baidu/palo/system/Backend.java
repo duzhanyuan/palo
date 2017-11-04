@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -33,7 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.baidu.palo.alter.DecommissionBackendJob.DecomissionType;
+import com.baidu.palo.alter.DecommissionBackendJob.DecommissionType;
 import com.baidu.palo.catalog.Catalog;
 import com.baidu.palo.catalog.DiskInfo;
 import com.baidu.palo.catalog.DiskInfo.DiskState;
@@ -53,7 +49,9 @@ import com.google.common.eventbus.EventBus;
 public class Backend implements Writable {
 
     public enum BackendState {
-        using, offline, free
+        using, /* backend is belong to a cluster*/
+        offline,
+        free /* backend is not belong to any clusters */
     }
 
     private static final Logger LOG = LogManager.getLogger(Backend.class);
@@ -72,7 +70,7 @@ public class Backend implements Writable {
 
     private AtomicBoolean isDecommissioned;
     private AtomicInteger decommissionType;
-    private String ownerClusterName;
+    private AtomicReference<String> ownerClusterName;
     // to index the state in some cluster
     private AtomicInteger backendState;
     // private BackendState backendState;
@@ -92,10 +90,10 @@ public class Backend implements Writable {
         this.beRpcPort = new AtomicInteger();
         this.disksRef = new AtomicReference<ImmutableMap<String, DiskInfo>>(ImmutableMap.<String, DiskInfo> of());
 
-        this.ownerClusterName = "";
+        this.ownerClusterName = new AtomicReference<String>("");
         this.backendState = new AtomicInteger(BackendState.free.ordinal());
         
-        this.decommissionType = new AtomicInteger(DecomissionType.SystemDecomission.ordinal());
+        this.decommissionType = new AtomicInteger(DecommissionType.SystemDecommission.ordinal());
     }
 
     public Backend(long id, String host, int heartbeatPort) {
@@ -112,9 +110,9 @@ public class Backend implements Writable {
         this.isAlive = new AtomicBoolean(false);
         this.isDecommissioned = new AtomicBoolean(false);
 
-        this.ownerClusterName = "";
+        this.ownerClusterName = new AtomicReference<String>(""); 
         this.backendState = new AtomicInteger(BackendState.free.ordinal());
-        this.decommissionType = new AtomicInteger(DecomissionType.SystemDecomission.ordinal());
+        this.decommissionType = new AtomicInteger(DecommissionType.SystemDecommission.ordinal());
     }
 
     public long getId() {
@@ -376,7 +374,7 @@ public class Backend implements Writable {
             entry.getValue().write(out);
         }
 
-        Text.writeString(out, ownerClusterName);
+        Text.writeString(out, ownerClusterName.get());
         out.writeInt(backendState.get());
         out.writeInt(decommissionType.get());
 
@@ -413,15 +411,14 @@ public class Backend implements Writable {
 
             disksRef.set(ImmutableMap.copyOf(disks));
         }
-
         if (Catalog.getCurrentCatalogJournalVersion() >= FeMetaVersion.VERSION_30) {
-            ownerClusterName = Text.readString(in);
+            ownerClusterName.set(Text.readString(in));
             backendState.set(in.readInt());
             decommissionType.set(in.readInt());
         } else {
-            ownerClusterName = SystemInfoService.DEFAULT_CLUSTER;
+            ownerClusterName.set(SystemInfoService.DEFAULT_CLUSTER);
             backendState.set(BackendState.using.ordinal());
-            decommissionType.set(DecomissionType.SystemDecomission.ordinal());
+            decommissionType.set(DecommissionType.SystemDecommission.ordinal());
         }
     }
 
@@ -447,11 +444,15 @@ public class Backend implements Writable {
     }
 
     public String getOwnerClusterName() {
-        return ownerClusterName;
+        return ownerClusterName.get();
     }
 
-    public void setOwnerClusterName(String ownerClusterName) {
-        this.ownerClusterName = ownerClusterName;
+    public void setOwnerClusterName(String name) {
+        ownerClusterName.set(name);
+    }
+    
+    public void clearClusterName() {
+        ownerClusterName.set("");
     }
 
     public BackendState getBackendState() {
@@ -467,14 +468,15 @@ public class Backend implements Writable {
         }
     }
 
-    public void setDecommissionType(DecomissionType type) {
+    public void setDecommissionType(DecommissionType type) {
         decommissionType.set(type.ordinal());
     }
     
-    public DecomissionType getDecommissionType() {
-        if (decommissionType.get() == DecomissionType.ClusterDecomission.ordinal()) {
-            return DecomissionType.ClusterDecomission;
+    public DecommissionType getDecommissionType() {
+        if (decommissionType.get() == DecommissionType.ClusterDecommission.ordinal()) {
+            return DecommissionType.ClusterDecommission;
         }
-        return DecomissionType.SystemDecomission;
+        return DecommissionType.SystemDecommission;
     }
+
 }

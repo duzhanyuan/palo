@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -21,16 +17,43 @@ package com.baidu.palo.analysis;
 
 import java.util.List;
 
+import com.baidu.palo.catalog.Catalog;
+import com.baidu.palo.common.AnalysisException;
+import com.baidu.palo.common.InternalException;
+import com.google.common.base.Strings;
+
 public class AddBackendClause extends BackendClause {
 
-    public AddBackendClause(List<String> hostPorts) {
+    // be in free state is not owned by any cluster
+    protected boolean isFree;
+    // cluster that backend will be added to 
+    protected String destCluster;
+   
+    public AddBackendClause(List<String> hostPorts, boolean isFree) {
         super(hostPorts);
+        this.isFree = isFree;
+        this.destCluster = "";
+    }
+
+    public AddBackendClause(List<String> hostPorts, String destCluster) {
+        super(hostPorts);
+        this.isFree = false;
+        this.destCluster = destCluster;
     }
 
     @Override
     public String toSql() {
         StringBuilder sb = new StringBuilder();
-        sb.append("ADD BACKEND ");
+        sb.append("ADD ");
+        if (isFree) {
+            sb.append("FREE ");
+        }
+        sb.append("BACKEND ");
+
+        if (!Strings.isNullOrEmpty(destCluster)) {
+            sb.append("to").append(destCluster);
+        }
+
         for (int i = 0; i < hostPorts.size(); i++) {
             sb.append("\"").append(hostPorts.get(i)).append("\"");
             if (i != hostPorts.size() - 1) {
@@ -39,4 +62,13 @@ public class AddBackendClause extends BackendClause {
         }
         return sb.toString();
     }
+
+    public boolean isFree() {
+        return this.isFree;
+    } 
+
+    public String getDestCluster() {
+        return destCluster;
+    }
+
 }

@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -27,16 +23,20 @@ import com.baidu.palo.http.ActionController;
 import com.baidu.palo.http.BaseRequest;
 import com.baidu.palo.http.BaseResponse;
 import com.baidu.palo.http.IllegalArgException;
+import com.baidu.palo.http.UnauthorizedException;
+
 import com.google.common.base.Strings;
 import com.google.gson.Gson;
-
-import io.netty.handler.codec.http.HttpMethod;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import io.netty.handler.codec.http.HttpMethod;
+
 import java.util.List;
 
+// Format:
+//   http://username:password@10.73.150.30:8138/api/show_proc?path=/
 public class ShowProcAction extends RestBaseAction {
     private static final Logger LOG = LogManager.getLogger(ShowProcAction.class);
 
@@ -50,6 +50,16 @@ public class ShowProcAction extends RestBaseAction {
 
     @Override
     public void execute(BaseRequest request, BaseResponse response) {
+        // check authority
+        try {
+            checkAdmin(request);
+            request.setAdmin(true);
+        } catch (UnauthorizedException e) {
+            response.appendContent("Authentication Failed. " + e.getMessage());
+            sendResult(request, response);
+            return;
+        }
+
         String path = request.getSingleParameter("path");
         ProcNodeInterface procNode = null;
         ProcService instance = ProcService.getInstance();
@@ -63,13 +73,13 @@ public class ShowProcAction extends RestBaseAction {
             LOG.warn(e.getMessage());
             response.getContent().append("[]");
         }
-        
+
         if (procNode != null) {
             ProcResult result;
             try {
                 result = procNode.fetchResult();
                 List<List<String>> rows = result.getRows();
-                
+
                 Gson gson = new Gson();
                 response.setContentType("application/json");
                 response.getContent().append(gson.toJson(rows));

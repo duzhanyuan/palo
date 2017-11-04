@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -226,17 +222,17 @@ public class StaticResourceAction extends WebBaseAction {
             return null;
         }
         // Convert file separators
-        path = path.replace('/', File.separatorChar);
+        String newPath = path.replace('/', File.separatorChar);
 
         // Simplistic dumb security check.
-        if (path.contains(File.separator + '.')
-                || path.contains('.' + File.separator)
-                || path.charAt(0) == '.'
-                || path.charAt(path.length() - 1) == '.'
-                || INSECURE_URI.matcher(path).matches()) {
+        if (newPath.contains(File.separator + '.')
+                || newPath.contains('.' + File.separator)
+                || newPath.charAt(0) == '.'
+                || newPath.charAt(newPath.length() - 1) == '.'
+                || INSECURE_URI.matcher(newPath).matches()) {
             return null;
         }
 
-        return path;
+        return newPath;
     }
 }

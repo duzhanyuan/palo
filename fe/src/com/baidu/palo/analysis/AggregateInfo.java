@@ -21,13 +21,13 @@
 package com.baidu.palo.analysis;
 
 import com.baidu.palo.common.AnalysisException;
-import com.baidu.palo.common.InternalException;
 import com.baidu.palo.planner.DataPartition;
 import com.baidu.palo.thrift.TPartitionType;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -68,7 +68,7 @@ import java.util.List;
  * TODO: move the merge construction logic from SelectStmt into AggregateInfo
  * TODO: Add query tests for aggregation with intermediate tuples with num_nodes=1.
  */
-public class AggregateInfo extends AggregateInfoBase {
+public final class AggregateInfo extends AggregateInfoBase {
     private final static Logger LOG = LogManager.getLogger(AggregateInfo.class);
 
     public enum AggPhase {
@@ -528,8 +528,6 @@ public class AggregateInfo extends AggregateInfoBase {
                     // SUM(DISTINCT <expr>) -> SUM(<last grouping slot>);
                     // (MIN(DISTINCT ...) and MAX(DISTINCT ...) have their DISTINCT turned
                     // off during analysis, and AVG() is changed to SUM()/COUNT())
-                    Preconditions.checkState(
-                            inputExpr.getFnName().getFunction().equalsIgnoreCase("SUM"));
                     Expr aggExprParam = new SlotRef(inputDesc.getSlots().get(origGroupingExprs.size()));
                     aggExpr = new FunctionCallExpr(inputExpr.getFnName(), Lists.newArrayList(aggExprParam));
                 }

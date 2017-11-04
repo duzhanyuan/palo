@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -66,13 +62,13 @@ public class DdlExecutor {
             CreateClusterStmt stmt = (CreateClusterStmt) ddlStmt;
             catalog.createCluster(stmt);
             catalog.getUserMgr().addUser(stmt.getClusterName(),
-                    ClusterNamespace.getUserFullName(stmt.getClusterName(), CreateClusterStmt.CLUSTER_SUPERUSER_NAME),
+                    ClusterNamespace.getFullName(stmt.getClusterName(), CreateClusterStmt.CLUSTER_SUPERUSER_NAME),
                     stmt.getPassword(), true);
         } else if (ddlStmt instanceof AlterClusterStmt) {
-            catalog.processModityCluster((AlterClusterStmt) ddlStmt);
+            catalog.processModifyCluster((AlterClusterStmt) ddlStmt);
         } else if (ddlStmt instanceof DropClusterStmt) {
             catalog.dropCluster((DropClusterStmt) ddlStmt);
-            catalog.getUserMgr().dropUser(ClusterNamespace.getUserFullName(((DropClusterStmt) ddlStmt).getName(),
+            catalog.getUserMgr().dropUser(ClusterNamespace.getFullName(((DropClusterStmt) ddlStmt).getName(),
                     CreateClusterStmt.CLUSTER_SUPERUSER_NAME));
         } else if (ddlStmt instanceof MigrateDbStmt) {
             catalog.migrateDb((MigrateDbStmt) ddlStmt);

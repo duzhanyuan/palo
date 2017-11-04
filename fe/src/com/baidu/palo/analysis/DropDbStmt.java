@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -52,9 +48,9 @@ public class DropDbStmt extends DdlStmt {
         if (Strings.isNullOrEmpty(dbName)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_WRONG_DB_NAME, dbName);
         }
-        dbName = ClusterNamespace.getDbFullName(getClusterName(), dbName);
+        dbName = ClusterNamespace.getFullName(getClusterName(), dbName);
         // Don't allowed to drop 'information_schema'
-        if (dbName.equalsIgnoreCase(ClusterNamespace.getDbFullName(getClusterName(), InfoSchemaDb.getDatabaseName()))) {
+        if (dbName.equalsIgnoreCase(ClusterNamespace.getFullName(getClusterName(), InfoSchemaDb.DATABASE_NAME))) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_DB_ACCESS_DENIED, analyzer.getUser(), dbName);
         }
         if (!analyzer.getCatalog().getUserMgr().isSuperuser(analyzer.getUser())) {

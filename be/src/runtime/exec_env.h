@@ -74,6 +74,10 @@ public:
     // declarations for classes in scoped_ptrs.
     virtual ~ExecEnv();
 
+    uint32_t cluster_id();
+
+    const std::string& token() const;
+
     DataStreamMgr* stream_mgr() {
         return _stream_mgr.get();
     }
@@ -101,8 +105,8 @@ public:
     MemTracker* process_mem_tracker() {
         return _mem_tracker.get();
     }
-    PoolMemTrackerRegistry* pool_mem_trackers() { 
-        return _pool_mem_trackers.get(); 
+    PoolMemTrackerRegistry* pool_mem_trackers() {
+        return _pool_mem_trackers.get();
     }
     ThreadResourceMgr* thread_mgr() {
         return _thread_mgr.get();
@@ -135,10 +139,6 @@ public:
         return _tmp_file_mgr.get();
     }
 
-    std::string* local_ip() {
-        return _local_ip.get();
-    }
-
     BfdParser* bfd_parser() const {
         return _bfd_parser.get();
     }
@@ -166,6 +166,7 @@ public:
     Status init_for_tests();
 
 private:
+    Status start_webserver();
     // Leave protected so that subclasses can override
     boost::scoped_ptr<DataStreamMgr> _stream_mgr;
     boost::scoped_ptr<ResultBufferMgr> _result_mgr;
@@ -184,7 +185,6 @@ private:
     boost::scoped_ptr<FragmentMgr> _fragment_mgr;
     boost::scoped_ptr<TMasterInfo> _master_info;
     boost::scoped_ptr<EtlJobMgr> _etl_job_mgr;
-    boost::scoped_ptr<std::string> _local_ip;
     boost::scoped_ptr<LoadPathMgr> _load_path_mgr;
     boost::scoped_ptr<DiskIoMgr> _disk_io_mgr;
     boost::scoped_ptr<TmpFileMgr> _tmp_file_mgr;

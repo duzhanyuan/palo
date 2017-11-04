@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -93,6 +89,7 @@ public class ExportJob implements Writable {
 
     private long id;
     private long dbId;
+    private String clusterName;
     private long tableId;
     private BrokerDesc brokerDesc;
     private String exportPath;
@@ -290,7 +287,7 @@ public class ExportJob implements Writable {
             TUniqueId queryId = new TUniqueId(uuid.getMostSignificantBits() + i, uuid.getLeastSignificantBits());
 
             Coordinator coord = new Coordinator(
-                    queryId, desc, Lists.newArrayList(fragment), Lists.newArrayList(scanNode));
+                    queryId, desc, Lists.newArrayList(fragment), Lists.newArrayList(scanNode), clusterName);
             coords.add(coord);
             this.coordList.add(coord);
         }
@@ -357,6 +354,10 @@ public class ExportJob implements Writable {
 
     public long getId() {
         return id;
+    }
+
+    public void setClusterName(String clusterName) {
+        this.clusterName = clusterName;
     }
 
     public long getDbId() {

@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -628,6 +624,7 @@ public class RollupJob extends AlterJob {
                     MaterializedIndex rollupIndex = this.partitionIdToRollupIndex.get(partitionId);
                     Preconditions.checkNotNull(rollupIndex);
 
+                    long rollupRowCount = 0L;
                     // 1. record replica info
                     for (Tablet tablet : rollupIndex.getTablets()) {
                         long tabletId = tablet.getId();
@@ -638,7 +635,20 @@ public class RollupJob extends AlterJob {
                                                                        replica.getDataSize(), replica.getRowCount());
                             this.partitionIdToReplicaInfos.put(partitionId, replicaInfo);
                         }
+
+                        // calculate rollup index row count
+                        long tabletRowCount = 0L;
+                        for (Replica replica : tablet.getReplicas()) {
+                            long replicaRowCount = replica.getRowCount();
+                            if (replicaRowCount > tabletRowCount) {
+                                tabletRowCount = replicaRowCount;
+                            }
+                        }
+                        rollupRowCount += tabletRowCount;
+ 
                     } // end for tablets
+
+                    rollupIndex.setRowCount(rollupRowCount);
 
                     // 2. add to partition
                     partition.createRollupIndex(rollupIndex);
@@ -721,11 +731,24 @@ public class RollupJob extends AlterJob {
             Partition partition = olapTable.getPartition(partitionId);
             MaterializedIndex rollupIndex = entry.getValue();
 
+            long rollupRowCount = 0L;
             for (Tablet tablet : rollupIndex.getTablets()) {
                 for (Replica replica : tablet.getReplicas()) {
                     replica.setState(ReplicaState.NORMAL);
                 }
+
+                // calculate rollup index row count
+                long tabletRowCount = 0L;
+                for (Replica replica : tablet.getReplicas()) {
+                    long replicaRowCount = replica.getRowCount();
+                    if (replicaRowCount > tabletRowCount) {
+                        tabletRowCount = replicaRowCount;
+                    }
+                }
+                rollupRowCount += tabletRowCount;
             }
+
+            rollupIndex.setRowCount(rollupRowCount);
             rollupIndex.setState(IndexState.NORMAL);
 
             MaterializedIndex baseIndex = partition.getIndex(baseIndexId);

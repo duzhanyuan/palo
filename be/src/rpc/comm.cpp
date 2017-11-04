@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -42,6 +38,7 @@ extern "C" {
 #include "io_handler_data.h"
 #include "reactor_factory.h"
 #include "reactor_runner.h"
+#include "service/backend_options.h"
 #include "scope_guard.h"
 
 namespace palo {
@@ -56,9 +53,7 @@ Comm::Comm() {
                    << "rpc::comm object";
         abort();
     }
-    char host[1024];
-    gethostname(host, sizeof(host));
-    InetAddr::initialize(&m_local_addr, host, 0);
+    InetAddr::initialize(&m_local_addr, BackendOptions::get_localhost().c_str(), 0);
     ReactorFactory::get_timer_reactor(m_timer_reactor);
     m_handler_map = ReactorRunner::handler_map;
 }

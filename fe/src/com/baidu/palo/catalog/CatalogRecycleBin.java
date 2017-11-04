@@ -1,12 +1,8 @@
 // Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
 
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -75,7 +71,7 @@ public class CatalogRecycleBin extends Daemon implements Writable {
         Preconditions.checkState(db.getTables().isEmpty());
 
         // erase db with same name
-        eraseDatabaseWithSameName(db.getName());
+        eraseDatabaseWithSameName(db.getFullName());
 
         // recylce db
         RecycleDatabaseInfo databaseInfo = new RecycleDatabaseInfo(db, tableNames);
@@ -159,7 +155,7 @@ public class CatalogRecycleBin extends Daemon implements Writable {
             Map.Entry<Long, RecycleDatabaseInfo> entry = iterator.next();
             RecycleDatabaseInfo dbInfo = entry.getValue();
             Database db = dbInfo.getDb();
-            if (db.getName().equals(dbName)) {
+            if (db.getFullName().equals(dbName)) {
                 iterator.remove();
                 idToRecycleTime.remove(entry.getKey());
 
@@ -359,7 +355,7 @@ public class CatalogRecycleBin extends Daemon implements Writable {
         Iterator<Map.Entry<Long, RecycleDatabaseInfo>> iterator = idToDatabase.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<Long, RecycleDatabaseInfo> entry = iterator.next();
-            if (dbName.equals(entry.getValue().getDb().getName())) {
+            if (dbName.equals(entry.getValue().getDb().getFullName())) {
                 dbInfo = entry.getValue();
                 break;
             }
