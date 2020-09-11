@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -19,9 +16,10 @@
 // under the License.
 
 #include "exec/union_node.h"
+#include "exprs/expr_context.h"
 #include "runtime/tuple_row.h"
 
-namespace palo {
+namespace doris {
 
 void IR_ALWAYS_INLINE UnionNode::materialize_exprs(const std::vector<ExprContext*>& exprs,
         TupleRow* row, uint8_t* tuple_buf, RowBatch* dst_batch) {
@@ -53,6 +51,16 @@ void UnionNode::materialize_batch(RowBatch* dst_batch, uint8_t** tuple_buf) {
 
     _child_row_idx += num_rows_to_process;
     *tuple_buf = cur_tuple;
+}
+
+Status UnionNode::get_error_msg(const std::vector<ExprContext*>& exprs) {
+    for (auto expr_ctx: exprs) {
+        std::string expr_error = expr_ctx->get_error_msg();
+        if (!expr_error.empty()) {
+            return Status::RuntimeError(expr_error);
+        }
+    }
+    return Status::OK();
 }
 
 }

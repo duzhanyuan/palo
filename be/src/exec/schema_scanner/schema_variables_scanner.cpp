@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -22,9 +19,9 @@
 #include "runtime/primitive_type.h"
 #include "runtime/string_value.h"
 #include "runtime/runtime_state.h"
-#include "exec/schema_scanner/frontend_helper.h"
+#include "exec/schema_scanner/schema_helper.h"
 
-namespace palo {
+namespace doris {
 
 SchemaScanner::ColumnDesc SchemaVariablesScanner::_s_vars_columns[] = {
     //   name,       type,          size
@@ -56,13 +53,13 @@ Status SchemaVariablesScanner::start(RuntimeState *state) {
     var_params.__set_threadId(_param->thread_id);
     
     if (NULL != _param->ip && 0 != _param->port) {
-        RETURN_IF_ERROR(FrontendHelper::show_varialbes(*(_param->ip),
+        RETURN_IF_ERROR(SchemaHelper::show_varialbes(*(_param->ip),
                     _param->port, var_params, &_var_result)); 
     } else {
-        return Status("IP or port dosn't exists");
+        return Status::InternalError("IP or port dosn't exists");
     }
     _begin = _var_result.variables.begin();
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SchemaVariablesScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
@@ -73,7 +70,7 @@ Status SchemaVariablesScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
         int len = strlen(_begin->first.c_str());
         str_slot->ptr = (char *)pool->allocate(len + 1);
         if (NULL == str_slot->ptr) {
-            return Status("No Memory.");
+            return Status::InternalError("No Memory.");
         }
         memcpy(str_slot->ptr, _begin->first.c_str(), len + 1);
         str_slot->len = len;
@@ -85,25 +82,25 @@ Status SchemaVariablesScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
         int len = strlen(_begin->second.c_str());
         str_slot->ptr = (char *)pool->allocate(len + 1);
         if (NULL == str_slot->ptr) {
-            return Status("No Memory.");
+            return Status::InternalError("No Memory.");
         }
         memcpy(str_slot->ptr, _begin->second.c_str(), len + 1);
         str_slot->len = len;
     }
     ++_begin;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SchemaVariablesScanner::get_next_row(Tuple *tuple, MemPool *pool, bool *eos) {
     if (!_is_init) {
-        return Status("call this before initial.");
+        return Status::InternalError("call this before initial.");
     }
     if (_begin == _var_result.variables.end()) {
         *eos = true;
-        return Status::OK;
+        return Status::OK();
     }
     if (NULL == tuple || NULL == pool || NULL == eos) {
-        return Status("invalid parameter.");
+        return Status::InternalError("invalid parameter.");
     }
     *eos = false;
     return fill_one_row(tuple, pool);

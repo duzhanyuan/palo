@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,15 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXPRS_INFO_FUNC_H
-#define BDG_PALO_BE_SRC_QUERY_EXPRS_INFO_FUNC_H
+#ifndef DORIS_BE_SRC_QUERY_EXPRS_INFO_FUNC_H
+#define DORIS_BE_SRC_QUERY_EXPRS_INFO_FUNC_H
 
 #include <string>
 #include <iostream>
+#include "common/object_pool.h"
 #include "exprs/expr.h"
 #include "gen_cpp/Exprs_types.h"
 
-namespace palo {
+namespace doris {
 
 class InfoFunc : public Expr {
 public:
@@ -40,10 +38,6 @@ protected:
     friend class Expr;
 
     InfoFunc(const TExprNode& node);
-
-    virtual Status get_codegend_compute_fn(RuntimeState* state, llvm::Function** fn) override {
-        return get_codegend_compute_fn_wrapper(state, fn);
-    }
 
     virtual StringVal get_string_val(ExprContext* context, TupleRow*);
     virtual BigIntVal get_big_int_val(ExprContext* context, TupleRow*);

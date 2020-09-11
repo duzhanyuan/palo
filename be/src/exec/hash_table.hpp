@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXEC_HASH_TABLE_HPP
-#define BDG_PALO_BE_SRC_QUERY_EXEC_HASH_TABLE_HPP
+#ifndef DORIS_BE_SRC_QUERY_EXEC_HASH_TABLE_HPP
+#define DORIS_BE_SRC_QUERY_EXEC_HASH_TABLE_HPP
 
 #include "exec/hash_table.h"
 
-namespace palo {
+namespace doris {
 
-inline HashTable::Iterator HashTable::find(TupleRow* probe_row) {
-    bool has_nulls = eval_probe_row(probe_row);
+inline HashTable::Iterator HashTable::find(TupleRow* probe_row, bool probe) {
+    bool has_nulls = probe ? eval_probe_row(probe_row) : eval_build_row(probe_row);
 
     if (!_stores_nulls && has_nulls) {
         return end();

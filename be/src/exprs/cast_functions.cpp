@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -20,16 +17,16 @@
 
 #include "exprs/cast_functions.h"
 
-#include <math.h>
-#include <boost/lexical_cast.hpp>
+#include <cmath>
 
 #include "exprs/anyval_util.h"
 #include "runtime/datetime_value.h"
 #include "runtime/string_value.h"
 #include "util/string_parser.hpp"
 #include "string_functions.h"
+#include "util/mysql_global.h"
 
-namespace palo {
+namespace doris {
 
 void CastFunctions::init() {
 }
@@ -116,7 +113,9 @@ CAST_FUNCTION(FloatVal, DoubleVal, double_val)
         num_type ret; \
         ret.val = StringParser::string_parser_fn<native_type>( \
                 reinterpret_cast<char*>(val.ptr), val.len, &result); \
-        if (UNLIKELY(result != StringParser::PARSE_SUCCESS)) return num_type::null(); \
+        if (UNLIKELY(result != StringParser::PARSE_SUCCESS || std::isnan(ret.val) || std::isinf(ret.val))) { \
+            return num_type::null(); \
+		} \
         return ret; \
     }
 
@@ -163,23 +162,50 @@ StringVal CastFunctions::cast_to_string_val(FunctionContext* ctx, const LargeInt
     return AnyValUtil::from_buffer_temp(ctx, d, len);
 }
 
+template<typename T>
+int float_to_string(T value, char* buf);
+
+template<>
+int float_to_string<float>(float value, char* buf) {
+    return FloatToBuffer(value, MAX_FLOAT_STR_LENGTH + 2, buf);
+}
+
+template<>
+int float_to_string<double>(double value, char* buf) {
+    return DoubleToBuffer(value, MAX_DOUBLE_STR_LENGTH + 2, buf);
+}
 
 #define CAST_FLOAT_TO_STRING(float_type, format) \
-    StringVal CastFunctions::cast_to_string_val(FunctionContext* ctx, const float_type& val) { \
-        if (val.is_null) return StringVal::null(); \
-        /* val.val could be -nan, return "nan" instead */ \
-        if (std::isnan(val.val)) return StringVal("nan"); \
-        /* Add 1 to MAX_FLOAT_CHARS since snprintf adds a trailing '\0' */ \
-        StringVal sv = StringVal::create_temp_string_val(ctx, MAX_FLOAT_CHARS + 1); \
-        sv.len = my_gcvt(val.val, format, MAX_FLOAT_CHARS, (char*)sv.ptr, NULL); \
-        return sv; \
-    }
+  StringVal CastFunctions::cast_to_string_val(FunctionContext* ctx, const float_type& val) { \
+    if (val.is_null) return StringVal::null(); \
+    /* val.val could be -nan, return "nan" instead */ \
+    if (std::isnan(val.val)) return StringVal("nan"); \
+    /* Add 1 to MAX_FLOAT_CHARS since snprintf adds a trailing '\0' */ \
+    StringVal sv(ctx, MAX_DOUBLE_STR_LENGTH + 2); \
+    if (UNLIKELY(sv.is_null)) { \
+      return sv; \
+    } \
+    const FunctionContext::TypeDesc& returnType = ctx->get_return_type(); \
+    if (returnType.len > 0) { \
+        sv.len = snprintf(reinterpret_cast<char*>(sv.ptr), sv.len, format, val.val); \
+        DCHECK_GT(sv.len, 0); \
+        DCHECK_LE(sv.len, MAX_FLOAT_CHARS); \
+        AnyValUtil::TruncateIfNecessary(returnType, &sv); \
+    } else if (returnType.len == -1) { \
+        char buf[MAX_DOUBLE_STR_LENGTH + 2]; \
+        sv.len = float_to_string(val.val, buf); \
+        memcpy(sv.ptr, buf, sv.len); \
+    } else { \
+        DCHECK(false); \
+    } \
+    return sv; \
+  }
 
 // Floats have up to 9 significant digits, doubles up to 17
 // (see http://en.wikipedia.org/wiki/Single-precision_floating-point_format
 // and http://en.wikipedia.org/wiki/Double-precision_floating-point_format)
-CAST_FLOAT_TO_STRING(FloatVal, MY_GCVT_ARG_FLOAT);
-CAST_FLOAT_TO_STRING(DoubleVal, MY_GCVT_ARG_DOUBLE);
+CAST_FLOAT_TO_STRING(FloatVal, "%.9g");
+CAST_FLOAT_TO_STRING(DoubleVal, "%.17g");
 
 StringVal CastFunctions::cast_to_string_val(FunctionContext* ctx, const DateTimeVal& val) {
     if (val.is_null) {
@@ -191,17 +217,40 @@ StringVal CastFunctions::cast_to_string_val(FunctionContext* ctx, const DateTime
     return sv;
 }
 
-#if 0
-
-StringVal CastFunctions::CastToStringVal(FunctionContext* ctx, const StringVal& val) {
+StringVal CastFunctions::cast_to_string_val(FunctionContext* ctx, const StringVal& val) {
   if (val.is_null) return StringVal::null();
   StringVal sv;
   sv.ptr = val.ptr;
   sv.len = val.len;
-  AnyValUtil::TruncateIfNecessary(ctx->GetReturnType(), &sv);
+  
+  const FunctionContext::TypeDesc& result_type = ctx->get_return_type();
+  if (result_type.len > 0) {
+      AnyValUtil::TruncateIfNecessary(result_type, &sv);
+  }
   return sv;
 }
 
+BooleanVal CastFunctions::cast_to_boolean_val(FunctionContext* ctx, const StringVal& val) {
+    if (val.is_null) {
+        return BooleanVal::null(); 
+    }
+    StringParser::ParseResult result;
+    BooleanVal ret;
+    IntVal int_val = cast_to_int_val(ctx, val);
+    if (!int_val.is_null && int_val.val == 0) {
+        ret.val = false;
+    } else if (!int_val.is_null && int_val.val == 1) {
+        ret.val = true;
+    } else {
+        ret.val = StringParser::string_to_bool(reinterpret_cast<char*>(val.ptr), val.len, &result);
+        if (UNLIKELY(result != StringParser::PARSE_SUCCESS)) { 
+            return BooleanVal::null();
+        }
+    }
+    return ret;
+}
+
+#if 0
 StringVal CastFunctions::CastToChar(FunctionContext* ctx, const StringVal& val) {
   if (val.is_null) return StringVal::null();
 
@@ -257,6 +306,7 @@ CAST_FROM_DATETIME(DoubleVal, double_val);
     CAST_TO_DATETIME(SmallIntVal);\
     CAST_TO_DATETIME(IntVal);\
     CAST_TO_DATETIME(BigIntVal);\
+    CAST_TO_DATETIME(LargeIntVal);\
     CAST_TO_DATETIME(FloatVal);\
     CAST_TO_DATETIME(DoubleVal);
 
@@ -279,6 +329,7 @@ CAST_TO_DATETIMES();
     CAST_TO_DATE(SmallIntVal);\
     CAST_TO_DATE(IntVal);\
     CAST_TO_DATE(BigIntVal);\
+    CAST_TO_DATE(LargeIntVal);\
     CAST_TO_DATE(FloatVal);\
     CAST_TO_DATE(DoubleVal);
 

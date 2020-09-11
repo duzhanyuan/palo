@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -13,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_OLAP_BHP_LIB_H
-#define BDG_PALO_BE_SRC_OLAP_BHP_LIB_H
+#ifndef DORIS_BE_SRC_OLAP_BHP_LIB_H
+#define DORIS_BE_SRC_OLAP_BHP_LIB_H
 
 #include <stddef.h>
 
-namespace palo {
+namespace doris {
 
 inline int memcmp_sse(const void* buf1, const  void* buf2, unsigned int count) {
     int result ;
@@ -766,28 +768,6 @@ inline int  baidu_crc32_qw(char const* src, int crc, unsigned int length) {
     return crc;
 }
 
-inline int check_sse4_2() {
-    int ret;
-    __asm__ __volatile__(
-        "mov $1, %%rax;"
-        "cpuid;"
-        "test $0x000100000, %%ecx;"
-        "jnz 1f;"
-        "xor %%eax, %%eax;"
-        "jmp 2f;"
+}  // namespace doris
 
-        "1:"
-        "mov $1, %%eax;"
-
-        "2:"
-        "mov %%eax, %0;"
-        :"=r"(ret)
-        :
-        :"%rax", "%rcx", "rdx", "%rbx", "memory"
-    );
-    return ret;
-}
-
-}  // namespace palo
-
-#endif // BDG_PALO_BE_SRC_OLAP_BHP_LIB_H
+#endif // DORIS_BE_SRC_OLAP_BHP_LIB_H

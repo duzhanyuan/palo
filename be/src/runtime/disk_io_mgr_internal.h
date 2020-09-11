@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_INTERNAL_H
-#define BDG_PALO_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_INTERNAL_H
+#ifndef DORIS_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_INTERNAL_H
+#define DORIS_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_INTERNAL_H
 
 #include "disk_io_mgr.h"
 
@@ -36,7 +33,7 @@
 
 // This file contains internal structures to the IoMgr. Users of the IoMgr do
 // not need to include this file.
-namespace palo {
+namespace doris {
 
 // Per disk state
 struct DiskIoMgr::DiskQueue {
@@ -141,8 +138,7 @@ public:
     RequestContext(DiskIoMgr* parent, int num_disks);
 
     // Resets this object.
-    // void reset(MemTracker* tracker);
-    void reset(MemTracker* tracker);
+    void reset(std::shared_ptr<MemTracker> tracker);
 
     // Decrements the number of active disks for this reader.  If the disk count
     // goes to 0, the disk complete condition variable is signaled.
@@ -199,8 +195,7 @@ private:
     DiskIoMgr* _parent;
 
     // Memory used for this reader.  This is unowned by this object.
-    // MemTracker* _mem_tracker;
-    MemTracker* _mem_tracker;
+    std::shared_ptr<MemTracker> _mem_tracker;
 
     // Total bytes read for this reader
     RuntimeProfile::Counter* _bytes_read_counter;
@@ -469,7 +464,7 @@ private:
     std::vector<PerDiskState> _disk_states;
 };
 
-} // namespace palo
+} // namespace doris
 
-#endif // BDG_PALO_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_INTERNAL_H
+#endif // DORIS_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_INTERNAL_H
 

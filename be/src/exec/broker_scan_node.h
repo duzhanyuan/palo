@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -23,16 +25,17 @@
 #include <mutex>
 #include <thread>
 
+#include "base_scanner.h"
 #include "common/status.h"
 #include "exec/scan_node.h"
 #include "gen_cpp/PaloInternalService_types.h"
 
-namespace palo {
+namespace doris {
 
 class RuntimeState;
 class PartRangeKey;
 class PartitionInfo;
-class BrokerScanCounter;
+struct ScannerCounter;
 
 class BrokerScanNode : public ScanNode {
 public:
@@ -40,19 +43,18 @@ public:
     virtual ~BrokerScanNode();
 
     // Called after create this scan node
-    virtual Status init(const TPlanNode& tnode) override;
+    virtual Status init(const TPlanNode& tnode, RuntimeState* state = nullptr) override;
 
-    // initialize _mysql_scanner, and create _text_converter.
+    // Prepare partition infos & set up timer
     virtual Status prepare(RuntimeState* state) override;
 
-    // Start MySQL scan using _mysql_scanner.
+    // Start broker scan using ParquetScanner or BrokerScanner.
     virtual Status open(RuntimeState* state) override;
 
-    // Fill the next row batch by calling next() on the _mysql_scanner,
-    // converting text data in MySQL cells to binary data.
+    // Fill the next row batch by calling next() on the scanner,
     virtual Status get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) override;
 
-    // Close the _mysql_scanner, and report errors.
+    // Close the scanner, and report errors.
     virtual Status close(RuntimeState* state) override;
 
     // No use
@@ -83,17 +85,20 @@ private:
     // Create scanners to do scan job
     Status start_scanners();
 
-    // One scanner worker, This scanner will hanle 'length' ranges start from start_idx
+    // One scanner worker, This scanner will handle 'length' ranges start from start_idx
     void scanner_worker(int start_idx, int length);
 
     // Scan one range
     Status scanner_scan(const TBrokerScanRange& scan_range,
                         const std::vector<ExprContext*>& conjunct_ctxs,
                         const std::vector<ExprContext*>& partition_expr_ctxs,
-                        BrokerScanCounter* counter);
+                        ScannerCounter* counter);
 
     // Find partition id with PartRangeKey
     int64_t binary_find_partition_id(const PartRangeKey& key) const;
+
+    std::unique_ptr<BaseScanner> create_scanner(const TBrokerScanRange& scan_range,
+                                                     ScannerCounter* counter);
 
 private:
     TupleId _tuple_id;

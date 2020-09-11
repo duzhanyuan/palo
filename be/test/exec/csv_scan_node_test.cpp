@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -30,7 +32,7 @@
 #include "util/cpu_info.h"
 #include "util/logging.h"
 
-namespace palo {
+namespace doris {
 
 class CsvScanNodeTest : public testing::Test {
 public:
@@ -250,7 +252,8 @@ TEST_F(CsvScanNodeTest, NormalUse) {
     status = scan_node.open(_state);
     ASSERT_TRUE(status.ok());
 
-    RowBatch row_batch(scan_node._row_descriptor, _state->batch_size(), new MemTracker(-1));
+    auto tracker = std::make_shared<MemTracker>();
+    RowBatch row_batch(scan_node._row_descriptor, _state->batch_size(), tracker.get());
     bool eos = false;
 
     while (!eos) {
@@ -289,7 +292,8 @@ TEST_F(CsvScanNodeTest, continuousDelim) {
     status = scan_node.open(_state);
     ASSERT_TRUE(status.ok());
 
-    RowBatch row_batch(scan_node._row_descriptor, _state->batch_size(), new MemTracker(-1));
+
+    RowBatch row_batch(scan_node._row_descriptor, _state->batch_size(), tracker.get());
     bool eos = false;
 
     while (!eos) {
@@ -328,7 +332,8 @@ TEST_F(CsvScanNodeTest, wrong_decimal_format_test) {
     status = scan_node.open(_state);
     ASSERT_TRUE(status.ok());
 
-    RowBatch row_batch(scan_node._row_descriptor, _state->batch_size(), new MemTracker(-1));
+    auto tracker = std::make_shared<MemTracker>();
+    RowBatch row_batch(scan_node._row_descriptor, _state->batch_size(), tracker.get());
     bool eos = false;
 
     while (!eos) {
@@ -356,7 +361,8 @@ TEST_F(CsvScanNodeTest, fill_fix_len_stringi_test) {
     status = scan_node.open(_state);
     ASSERT_TRUE(status.ok());
 
-    RowBatch row_batch(scan_node._row_descriptor, _state->batch_size(), new MemTracker(-1));
+    auto tracker = std::make_shared<MemTracker>();
+    RowBatch row_batch(scan_node._row_descriptor, _state->batch_size(), tracker.get());
     bool eos = false;
 
     while (!eos) {
@@ -401,7 +407,8 @@ TEST_F(CsvScanNodeTest, wrong_fix_len_string_format_test) {
     status = scan_node.open(_state);
     ASSERT_TRUE(status.ok());
 
-    RowBatch row_batch(scan_node._row_descriptor, _state->batch_size(), new MemTracker(-1));
+    auto tracker = std::make_shared<MemTracker>();
+    RowBatch row_batch(scan_node._row_descriptor, _state->batch_size(), tracker.get());
     bool eos = false;
 
     while (!eos) {
@@ -423,22 +430,22 @@ TEST_F(CsvScanNodeTest, wrong_fix_len_string_format_test) {
 // 3. 文件中有但表中没有的列，导入命令中跳过该列
 // 4. max_filter_ratio
 
-} // end namespace palo
+} // end namespace doris
 
 int main(int argc, char** argv) {
-    // std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    // if (!palo::config::init(conffile.c_str(), false)) {
+    // std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    // if (!doris::config::init(conffile.c_str(), false)) {
     //     fprintf(stderr, "error read config file. \n");
     //     return -1;
     // }
-    palo::config::read_size = 8388608;
-    palo::config::min_buffer_size = 1024;
+    doris::config::read_size = 8388608;
+    doris::config::min_buffer_size = 1024;
 
-    palo::init_glog("be-test");
+    doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
 
-    palo::CpuInfo::init();
-    palo::DiskInfo::init();
+    doris::CpuInfo::init();
+    doris::DiskInfo::init();
 
     return RUN_ALL_TESTS();
 }

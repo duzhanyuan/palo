@@ -1,6 +1,3 @@
-# Modifications copyright (C) 2017, Baidu.com, Inc.
-# Copyright 2017 The Apache Software Foundation
-
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -28,5 +25,13 @@ ADD_BE_TEST(json_function_test)
 #ADD_BE_TEST(binary_predicate_test)
 #ADD_BE_TEST(in_predicate_test)
 #ADD_BE_TEST(expr-test)
-ADD_BE_TEST(hybird_set_test)
+#ADD_BE_TEST(hybird_set_test)
+ADD_BE_TEST(string_functions_test)
+ADD_BE_TEST(timestamp_functions_test)
+ADD_BE_TEST(percentile_approx_test)
+ADD_BE_TEST(bitmap_function_test)
+ADD_BE_TEST(hll_function_test)
+ADD_BE_TEST(encryption_functions_test)
 #ADD_BE_TEST(in-predicate-test)
+ADD_BE_TEST(math_functions_test)
+

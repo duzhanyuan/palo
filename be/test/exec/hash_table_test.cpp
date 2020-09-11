@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -26,11 +28,10 @@
 #include "exprs/expr.h"
 #include "runtime/mem_pool.h"
 #include "runtime/string_value.h"
-#include "runtime/mem_limit.hpp"
 #include "util/cpu_info.h"
 #include "util/runtime_profile.h"
 
-namespace palo {
+namespace doris {
 
 using std::vector;
 using std::map;
@@ -275,12 +276,11 @@ TEST_F(HashTableTest, GrowTableTest) {
     int build_row_val = 0;
     int num_to_add = 4;
     int expected_size = 0;
-    MemTracker mem_limit(1024 * 1024);
-    vector<MemTracker*> mem_limits;
-    mem_limits.push_back(&mem_limit);
+
+    auto mem_tracker = std::make_shared<MemTracker>(1024 * 1024);
     HashTable hash_table(
-        _build_expr, _probe_expr, 1, false, 0, mem_limits, num_to_add);
-    EXPECT_TRUE(!mem_limit.limit_exceeded());
+        _build_expr, _probe_expr, 1, false, 0, mem_tracker, num_to_add);
+    EXPECT_FALSE(mem_tracker->limit_exceeded());
 
     // This inserts about 5M entries
     for (int i = 0; i < 20; ++i) {
@@ -293,7 +293,7 @@ TEST_F(HashTableTest, GrowTableTest) {
         EXPECT_EQ(hash_table.size(), expected_size);
     }
 
-    EXPECT_TRUE(mem_limit.limit_exceeded());
+    EXPECT_TRUE(mem_tracker->limit_exceeded());
 
     // Validate that we can find the entries
     for (int i = 0; i < expected_size * 5; i += 100000) {
@@ -314,11 +314,10 @@ TEST_F(HashTableTest, GrowTableTest2) {
     int build_row_val = 0;
     int num_to_add = 1024;
     int expected_size = 0;
-    MemTracker mem_limit(1024 * 1024);
-    vector<MemTracker*> mem_limits;
-    mem_limits.push_back(&mem_limit);
+
+    auto mem_tracker = std::make_shared<MemTracker>(1024 * 1024);
     HashTable hash_table(
-        _build_expr, _probe_expr, 1, false, 0, mem_limits, num_to_add);
+        _build_expr, _probe_expr, 1, false, 0, mem_tracker, num_to_add);
 
     LOG(INFO) << time(NULL);
 
@@ -342,13 +341,13 @@ TEST_F(HashTableTest, GrowTableTest2) {
 }
 
 int main(int argc, char** argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    if (!palo::config::init(conffile.c_str(), false)) {
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
         fprintf(stderr, "error read config file. \n");
         return -1;
     }
     init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
-    palo::CpuInfo::init();
+    doris::CpuInfo::init();
     return RUN_ALL_TESTS();
 }

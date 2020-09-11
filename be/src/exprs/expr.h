@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXPRS_EXPR_H
-#define BDG_PALO_BE_SRC_QUERY_EXPRS_EXPR_H
+#ifndef DORIS_BE_SRC_QUERY_EXPRS_EXPR_H
+#define DORIS_BE_SRC_QUERY_EXPRS_EXPR_H
 
 #include <string>
 #include <vector>
@@ -36,27 +33,19 @@
 #include "runtime/string_value.hpp"
 #include "runtime/datetime_value.h"
 #include "runtime/decimal_value.h"
+#include "runtime/decimalv2_value.h"
 #include "udf/udf.h"
-#include "runtime/lib_cache.h"
 #include "runtime/types.h"
 //#include <boost/scoped_ptr.hpp>
 //
-#undef USING_PALO_UDF
-#define USING_PALO_UDF using namespace palo_udf
+#undef USING_DORIS_UDF
+#define USING_DORIS_UDF using namespace doris_udf
 
-USING_PALO_UDF;
+USING_DORIS_UDF;
 
-namespace llvm {
-class BasicBlock;
-class Function;
-class Type;
-class Value;
-};
-
-namespace palo {
+namespace doris {
 
 class Expr;
-class LlvmCodeGen;
 class ObjectPool;
 class RowDescriptor;
 class RuntimeState;
@@ -67,6 +56,8 @@ class SetVar;
 class TupleIsNullPredicate;
 class VectorizedRowBatch;
 class Literal;
+class MemTracker;
+class UserFunctionCacheEntry;
 
 // This is the superclass of all expr evaluation nodes.
 class Expr {
@@ -124,6 +115,7 @@ public:
     // virtual ArrayVal GetArrayVal(ExprContext* context, TupleRow*);
     virtual DateTimeVal get_datetime_val(ExprContext* context, TupleRow*);
     virtual DecimalVal get_decimal_val(ExprContext* context, TupleRow*);
+    virtual DecimalV2Val get_decimalv2_val(ExprContext* context, TupleRow*);
 
     // Get the number of digits after the decimal that should be displayed for this
     // value. Returns -1 if no scale has been specified (currently the scale is only set for
@@ -161,8 +153,18 @@ public:
         return _node_type;
     }
 
+    const TFunction& fn() const {
+        return _fn;
+    }
+
     bool is_slotref() const {
         return _is_slotref;
+    }
+
+    /// Returns true if this expr uses a FunctionContext to track its runtime state.
+    /// Overridden by exprs which use FunctionContext.
+    virtual bool has_fn_ctx() const { 
+        return false; 
     }
 
     /// Returns an error status if the function context associated with the
@@ -170,6 +172,8 @@ public:
     Status get_fn_context_error(ExprContext* ctx);
 
     static TExprNodeType::type type_without_cast(const Expr* expr);
+
+    static const Expr* expr_without_cast(const Expr* expr);
 
     // Returns true if expr doesn't contain slotrefs, ie, can be evaluated
     // with get_value(NULL). The default implementation returns true if all of
@@ -198,10 +202,34 @@ public:
     static Status create_expr_trees(ObjectPool* pool, const std::vector<TExpr>& texprs,
                                     std::vector<ExprContext*>* ctxs);
 
+    /// Create a new ScalarExpr based on thrift Expr 'texpr'. The newly created ScalarExpr
+    /// is stored in ObjectPool 'pool' and returned in 'expr' on success. 'row_desc' is the
+    /// tuple row descriptor of the input tuple row. On failure, 'expr' is set to NULL and
+    /// the expr tree (if created) will be closed. Error status will be returned too.
+    static Status create(const TExpr& texpr, const RowDescriptor& row_desc, RuntimeState* state,
+                         ObjectPool* pool, Expr** expr, const std::shared_ptr<MemTracker>& tracker);
+
+    /// Create a new ScalarExpr based on thrift Expr 'texpr'. The newly created ScalarExpr
+    /// is stored in ObjectPool 'state->obj_pool()' and returned in 'expr'. 'row_desc' is
+    /// the tuple row descriptor of the input tuple row. Returns error status on failure.
+    static Status create(const TExpr& texpr, const RowDescriptor& row_desc, RuntimeState* state,
+                         Expr** expr, const std::shared_ptr<MemTracker>& tracker);
+
+    /// Convenience functions creating multiple ScalarExpr.
+    static Status create(const std::vector<TExpr>& texprs, const RowDescriptor& row_desc,
+                         RuntimeState* state, ObjectPool* pool, std::vector<Expr*>* exprs,
+                         const std::shared_ptr<MemTracker>& tracker);
+
+    /// Convenience functions creating multiple ScalarExpr.
+    static Status create(const std::vector<TExpr>& texprs, const RowDescriptor& row_desc,
+                         RuntimeState* state, std::vector<Expr*>* exprs,
+                         const std::shared_ptr<MemTracker>& tracker);
+
     /// Convenience function for preparing multiple expr trees.
     /// Allocations from 'ctxs' will be counted against 'tracker'.
     static Status prepare(const std::vector<ExprContext*>& ctxs, RuntimeState* state,
-                          const RowDescriptor& row_desc, MemTracker* tracker);
+                          const RowDescriptor& row_desc,
+                          const std::shared_ptr<MemTracker>& tracker);
 
     /// Convenience function for opening multiple expr trees.
     static Status open(const std::vector<ExprContext*>& ctxs, RuntimeState* state);
@@ -218,6 +246,9 @@ public:
     /// Convenience function for closing multiple expr trees.
     static void close(const std::vector<ExprContext*>& ctxs, RuntimeState* state);
 
+    /// Convenience functions for closing a list of ScalarExpr.
+    static void close(const std::vector<Expr*>& exprs);
+
     // Computes a memory efficient layout for storing the results of evaluating 'exprs'
     // Returns the number of bytes necessary to store all the results and offsets
     // where the result for each expr should be stored.
@@ -229,29 +260,21 @@ public:
     static int compute_results_layout(const std::vector<ExprContext*>& ctxs,
                                     std::vector<int>* offsets, int* var_result_begin);
 
-    /// Returns an llvm::Function* with signature:
-    /// <subclass of AnyVal> ComputeFn(ExprContext* context, TupleRow* row)
-    //
-    /// The function should evaluate this expr over 'row' and return the result as the
-    /// appropriate type of AnyVal.
-    virtual Status get_codegend_compute_fn(RuntimeState* state, llvm::Function** fn) = 0;
-
     /// If this expr is constant, evaluates the expr with no input row argument and returns
     /// the output. Returns NULL if the argument is not constant. The returned AnyVal* is
     /// owned by this expr. This should only be called after Open() has been called on this
     /// expr.
     virtual AnyVal* get_const_val(ExprContext* context);
 
-    /// Finds all calls to Expr::GetConstant() in 'fn' and replaces them with the requested
-    /// runtime constant. Returns the number of calls replaced. This should be used in
-    /// GetCodegendComputeFn().
-    int inline_constants(LlvmCodeGen* codegen, llvm::Function* fn);
+    /// Assigns indices into the FunctionContext vector 'fn_ctxs_' in an evaluator to
+    /// nodes which need FunctionContext in the tree. 'next_fn_ctx_idx' is the index
+    /// of the next available entry in the vector. It's updated as this function is
+    /// called recursively down the tree.
+    void assign_fn_ctx_idx(int* next_fn_ctx_idx);
 
     virtual std::string debug_string() const;
     static std::string debug_string(const std::vector<Expr*>& exprs);
     static std::string debug_string(const std::vector<ExprContext*>& ctxs);
-
-    static const char* _s_llvm_class_name;
 
     // Prefix of Expr::GetConstant() symbols, regardless of template specialization
     static const char* _s_get_constant_symbol_prefix;
@@ -297,6 +320,13 @@ protected:
     friend class CompoundPredicate;
     friend class ScalarFnCall;
     friend class HllHashFunction;
+
+    /// Constructs an Expr tree from the thrift Expr 'texpr'. 'root' is the root of the
+    /// Expr tree created from texpr.nodes[0] by the caller (either ScalarExpr or AggFn).
+    /// The newly created Expr nodes are added to 'pool'. Returns error status on failure.
+    static Status create_tree(const TExpr& texpr, ObjectPool* pool, Expr* root);
+
+    int fn_ctx_idx() const { return _fn_ctx_idx; }
 
     Expr(const TypeDescriptor& type);
     Expr(const TypeDescriptor& type, bool is_slotref);
@@ -346,13 +376,16 @@ protected:
             ExprContext* context,
             FunctionContext::FunctionStateScope scope);
 
+    /// Releases cache entries to LibCache in all nodes of the Expr tree.
+    virtual void close();
+
     /// Helper function that calls ctx->Register(), sets fn_context_index_, and returns the
     /// registered FunctionContext.
     FunctionContext* register_function_context(
         ExprContext* ctx, RuntimeState* state, int varargs_buffer_size);
 
     /// Cache entry for the library implementing this function.
-    LibCache::LibCacheEntry* _cache_entry;
+    UserFunctionCacheEntry* _cache_entry = nullptr;
 
     // function opcode
 
@@ -378,39 +411,12 @@ protected:
     /// doesn't call RegisterFunctionContext().
     int _fn_context_index;
 
-    /// Cached codegened compute function. Exprs should set this in get_codegend_compute_fn().
-    llvm::Function* _ir_compute_fn;
-
     // If this expr is constant, this will store and cache the value generated by
     // get_const_val().
     std::shared_ptr<AnyVal> _constant_val;
 
     // function to evaluate vectorize expr; typically set in prepare()
     VectorComputeFn _vector_compute_fn;
-
-    // vector function opcode
-    // TExprOpcode::type _vector_opcode;
-
-    /// Helper function to create an empty Function* with the appropriate signature to be
-    /// returned by GetCodegendComputeFn(). 'name' is the name of the returned Function*.
-    /// The arguments to the function are returned in 'args'.
-    llvm::Function* create_ir_function_prototype(
-        LlvmCodeGen* codegen, const std::string& name, llvm::Value* (*args)[2]);
-
-    /// Generates an IR compute function that calls the appropriate interpreted Get*Val()
-    /// compute function.
-    //
-    /// This is useful for builtins that can't be implemented with the UDF interface
-    /// (e.g. functions that need short-circuiting) and that don't have custom codegen
-    /// functions that use the IRBuilder. It doesn't provide any performance benefit over
-    /// the interpreted path.
-    /// TODO: this should be replaced with fancier xcompiling infrastructure
-    Status get_codegend_compute_fn_wrapper(RuntimeState* state, llvm::Function** fn);
-
-    /// Returns the IR version of the static Get*Val() wrapper function corresponding to
-    /// 'type'. This is used for calling interpreted Get*Val() functions from codegen'd
-    /// functions (e.g. in ScalarFnCall() when codegen is disabled).
-    llvm::Function* get_static_get_val_wrapper(const TypeDescriptor& type, LlvmCodeGen* codegen);
 
     /// Simple debug string that provides no expr subclass-specific information
     std::string debug_string(const std::string& expr_name) const {
@@ -466,10 +472,36 @@ private:
     static StringVal get_string_val(Expr* expr, ExprContext* context, TupleRow* row);
     static DateTimeVal get_datetime_val(Expr* expr, ExprContext* context, TupleRow* row);
     static DecimalVal get_decimal_val(Expr* expr, ExprContext* context, TupleRow* row);
+    static DecimalV2Val get_decimalv2_val(Expr* expr, ExprContext* context, TupleRow* row);
 
-    // Helper function for InlineConstants(). Returns the IR version of what GetConstant()
-    // would return.
-    llvm::Value* get_ir_constant(LlvmCodeGen* codegen, ExprConstant c, int i);
+    /// Creates an expression tree rooted at 'root' via depth-first traversal.
+    /// Called recursively to create children expr trees for sub-expressions.
+    ///
+    /// parameters:
+    ///   nodes: vector of thrift expression nodes to be unpacked.
+    ///          It is essentially an Expr tree encoded in a depth-first manner.
+    ///   pool: Object pool in which Expr created from nodes are stored.
+    ///   root: root of the new tree. Created and initialized by the caller.
+    ///   child_node_idx: index into 'nodes' to be unpacked. It's the root of the next child
+    ///                   child Expr tree to be added to 'root'. Updated as 'nodes' are
+    ///                   consumed to construct the tree.
+    /// return
+    ///   status.ok() if successful
+    ///   !status.ok() if tree is inconsistent or corrupt
+    static Status create_tree_internal(const std::vector<TExprNode>& nodes,
+        ObjectPool* pool, Expr* parent, int* child_node_idx);
+
+    /// 'fn_ctx_idx_' is the index into the FunctionContext vector in ScalarExprEvaluator
+    /// for storing FunctionContext needed to evaluate this ScalarExprNode. It's -1 if this
+    /// ScalarExpr doesn't need a FunctionContext. The FunctionContext is managed by the
+    /// evaluator and initialized by calling ScalarExpr::OpenEvaluator().
+    int _fn_ctx_idx = -1;
+
+    /// [fn_ctx_idx_start_, fn_ctx_idx_end_) defines the range in FunctionContext vector
+    /// in ScalarExpeEvaluator for the expression subtree rooted at this ScalarExpr node.
+    int _fn_ctx_idx_start = 0;
+    int _fn_ctx_idx_end = 0;
+
 };
 
 inline bool Expr::evaluate(VectorizedRowBatch* batch) {

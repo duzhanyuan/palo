@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -26,19 +23,7 @@
 #include "runtime/tuple_row.h"
 #include "udf/udf.h"
 
-using llvm::Function;
-
-namespace palo {
-
-#define CONDITIONAL_CODEGEN_FN(expr_class) \
-    Status expr_class::get_codegend_compute_fn(RuntimeState* state, llvm::Function** fn) { \
-        return get_codegend_compute_fn_wrapper(state, fn); \
-    }
-
-CONDITIONAL_CODEGEN_FN(IfNullExpr);
-CONDITIONAL_CODEGEN_FN(NullIfExpr);
-CONDITIONAL_CODEGEN_FN(IfExpr);
-CONDITIONAL_CODEGEN_FN(CoalesceExpr);
+namespace doris {
 
 #define CTOR_DCTOR_FUN(expr_class) \
     expr_class::expr_class(const TExprNode& node) : Expr(node) { \

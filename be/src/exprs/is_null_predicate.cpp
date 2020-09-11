@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -21,7 +18,7 @@
 #include "exprs/is_null_predicate.h"
 #include "udf/udf.h"
 
-namespace palo {
+namespace doris {
 
 void IsNullPredicate::init() {
 }
@@ -48,6 +45,7 @@ template BooleanVal IsNullPredicate::is_null(FunctionContext*, const DoubleVal&)
 template BooleanVal IsNullPredicate::is_null(FunctionContext*, const StringVal&);
 template BooleanVal IsNullPredicate::is_null(FunctionContext*, const DateTimeVal&);
 template BooleanVal IsNullPredicate::is_null(FunctionContext*, const DecimalVal&);
+template BooleanVal IsNullPredicate::is_null(FunctionContext*, const DecimalV2Val&);
 
 template BooleanVal IsNullPredicate::is_not_null(FunctionContext*, const AnyVal&);
 template BooleanVal IsNullPredicate::is_not_null(FunctionContext*, const BooleanVal&);
@@ -61,5 +59,6 @@ template BooleanVal IsNullPredicate::is_not_null(FunctionContext*, const DoubleV
 template BooleanVal IsNullPredicate::is_not_null(FunctionContext*, const StringVal&);
 template BooleanVal IsNullPredicate::is_not_null(FunctionContext*, const DateTimeVal&);
 template BooleanVal IsNullPredicate::is_not_null(FunctionContext*, const DecimalVal&);
+template BooleanVal IsNullPredicate::is_not_null(FunctionContext*, const DecimalV2Val&);
 
 }

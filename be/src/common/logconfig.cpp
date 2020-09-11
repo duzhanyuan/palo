@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,16 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "util/logging.h"
+
 #include <iostream>
 #include <cerrno>
 #include <cstring>
 #include <cstdlib>
 #include <mutex>
+
 #include <glog/logging.h>
 #include <glog/vlog_is_on.h>
-#include "common/config.h"
 
-namespace palo {
+#include "common/config.h"
+#include "gutil/stringprintf.h"
+
+namespace doris {
 
 static bool logging_initialized = false;
 
@@ -128,12 +130,13 @@ bool init_glog(const char* basename, bool install_signal_handler) {
         return false;
     }
 
-    // set verbose modules. only use vlog(0)
+    // set verbose modules.
     FLAGS_v = -1;
     std::vector<std::string>& verbose_modules = config::sys_log_verbose_modules;
+    int32_t vlog_level = config::sys_log_verbose_level;
     for (size_t i = 0; i < verbose_modules.size(); i++) {
         if (verbose_modules[i].size() != 0) {
-            google::SetVLOGLevel(verbose_modules[i].c_str(), 10);
+            google::SetVLOGLevel(verbose_modules[i].c_str(), vlog_level);
         }
     }
 
@@ -150,4 +153,19 @@ void shutdown_logging() {
     google::ShutdownGoogleLogging();
 }
 
-} // namespace palo
+std::string FormatTimestampForLog(MicrosecondsInt64 micros_since_epoch) {
+    time_t secs_since_epoch = micros_since_epoch / 1000000;
+    int usecs = micros_since_epoch % 1000000;
+    struct tm tm_time;
+    localtime_r(&secs_since_epoch, &tm_time);
+
+    return StringPrintf("%02d%02d %02d:%02d:%02d.%06d",
+                        1 + tm_time.tm_mon,
+                        tm_time.tm_mday,
+                        tm_time.tm_hour,
+                        tm_time.tm_min,
+                        tm_time.tm_sec,
+                        usecs);
+}
+
+} // namespace doris

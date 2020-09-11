@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -32,7 +29,7 @@
 
 using std::vector;
 
-namespace palo {
+namespace doris {
 
 // BatchedRowSupplier returns individual rows in a batch obtained from a sorted input
 // run (a RunBatchSupplier). Used as the heap element in the min heap maintained by the
@@ -58,10 +55,10 @@ public:
         RETURN_IF_ERROR(_sorted_run(&_input_row_batch));
         if (_input_row_batch == NULL) {
             *done = true;
-            return Status::OK;
+            return Status::OK();
         }
         RETURN_IF_ERROR(next(NULL, done));
-        return Status::OK;
+        return Status::OK();
     }
 
     // Increment the current row index. If the current input batch is exhausted fetch the
@@ -82,7 +79,7 @@ public:
             *done = _input_row_batch == NULL;
             _input_row_batch_index = 0;
         }
-        return Status::OK;
+        return Status::OK();
     }
 
     TupleRow* current_row() const {
@@ -157,14 +154,14 @@ Status SortedRunMerger::prepare(const vector<RunBatchSupplier>& input_runs) {
     for (int i = last_parent; i >= 0; --i) {
         heapify(i);
     }
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SortedRunMerger::get_next(RowBatch* output_batch, bool* eos) {
     ScopedTimer<MonotonicStopWatch> timer(_get_next_timer);
     if (_min_heap.empty()) {
         *eos = true;
-        return Status::OK;
+        return Status::OK();
     }
 
     while (!output_batch->at_capacity()) {
@@ -198,7 +195,7 @@ Status SortedRunMerger::get_next(RowBatch* output_batch, bool* eos) {
     }
 
     *eos = _min_heap.empty();
-    return Status::OK;
+    return Status::OK();
 }
 
-} // namespace palo
+} // namespace doris

@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_UTIL_STREAMING_SAMPLER_H
-#define BDG_PALO_BE_SRC_UTIL_STREAMING_SAMPLER_H
+#ifndef DORIS_BE_SRC_UTIL_STREAMING_SAMPLER_H
+#define DORIS_BE_SRC_UTIL_STREAMING_SAMPLER_H
 
 #include <string.h>
 #include <iostream>
@@ -27,7 +24,7 @@
 
 #include "util/spinlock.h"
 
-namespace palo {
+namespace doris {
 
 /// A fixed-size sampler to collect samples over time. AddSample should be
 /// called periodically with the sampled value. Samples are added at the max

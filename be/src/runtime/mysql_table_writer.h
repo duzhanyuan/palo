@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -13,16 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_RUNTIME_MYSQL_TABLE_WRITER_H
-#define BDG_PALO_BE_RUNTIME_MYSQL_TABLE_WRITER_H
+#ifndef DORIS_BE_RUNTIME_MYSQL_TABLE_WRITER_H
+#define DORIS_BE_RUNTIME_MYSQL_TABLE_WRITER_H
 
 #include <string>
 #include <vector>
-#include <mysql/mysql.h>
 
 #include "common/status.h"
 
-namespace palo {
+#ifndef __DorisMysql
+#define __DorisMysql void
+#endif
+
+namespace doris {
 
 struct MysqlConnInfo {
     std::string host;
@@ -47,17 +52,17 @@ public:
     Status open(const MysqlConnInfo& conn_info, const std::string& tbl);
 
     Status begin_trans() {
-        return Status::OK;
+        return Status::OK();
     }
 
     Status append(RowBatch* batch);
 
     Status abort_tarns() {
-        return Status::OK;
+        return Status::OK();
     }
 
     Status finish_tarns() {
-        return Status::OK;
+        return Status::OK();
     }
 
 private:
@@ -65,7 +70,7 @@ private:
 
     const std::vector<ExprContext*>& _output_expr_ctxs;
     std::string _mysql_tbl;
-    MYSQL* _mysql_conn;
+    __DorisMysql* _mysql_conn;
 };
 
 }

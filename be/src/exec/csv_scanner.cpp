@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -17,7 +19,7 @@
 
 #include <boost/algorithm/string.hpp>
 
-namespace palo {
+namespace doris {
     CsvScanner::CsvScanner(const std::vector<std::string>& csv_file_paths) :
             _is_open(false),
             _file_paths(csv_file_paths),
@@ -42,22 +44,22 @@ namespace palo {
 
         if (_is_open) {
             LOG(INFO) << "this scanner already opened";
-            return Status::OK;
+            return Status::OK();
         }
 
         if (_file_paths.empty()) {
-            return Status("no file specified.");
+            return Status::InternalError("no file specified.");
         }
 
         _is_open = true;
-        return Status::OK;
+        return Status::OK();
     }
 
     // TODO(lingbin): read more than one line at a time to reduce IO comsumption
     Status CsvScanner::get_next_row(std::string* line_str, bool* eos) {
         if (_current_file == nullptr && _current_file_idx == _file_paths.size()) {
             *eos = true;
-            return Status::OK;
+            return Status::OK();
         }
 
         if (_current_file == nullptr && _current_file_idx < _file_paths.size()) {
@@ -66,7 +68,7 @@ namespace palo {
 
             _current_file = new std::ifstream(file_path, std::ifstream::in);
             if (!_current_file->is_open()) {
-                return Status("Fail to read csv file: " + file_path);
+                return Status::InternalError("Fail to read csv file: " + file_path);
             }
             ++_current_file_idx;
         }
@@ -79,12 +81,12 @@ namespace palo {
 
             if (_current_file_idx == _file_paths.size()) {
                 *eos = true;
-                return Status::OK;
+                return Status::OK();
             }
         }
 
         *eos = false;
-        return Status::OK;
+        return Status::OK();
     }
-} // end namespace palo
+} // end namespace doris
 

@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -13,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_OLAP_FILE_HELPER_H
-#define BDG_PALO_BE_SRC_OLAP_FILE_HELPER_H
+#ifndef DORIS_BE_SRC_OLAP_FILE_HELPER_H
+#define DORIS_BE_SRC_OLAP_FILE_HELPER_H
 
 #include <stdio.h>
 #include <sys/stat.h>
@@ -27,8 +29,9 @@
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/utils.h"
+#include "util/debug_util.h"
 
-namespace palo {
+namespace doris {
 
 typedef struct FileDescriptor {
     int fd;
@@ -48,7 +51,6 @@ public:
     // The argument mode specifies the permissions to use in case a new file is created.
     OLAPStatus open_with_mode(const std::string& file_name, int flag, int mode);
     OLAPStatus close();
-    OLAPStatus release();
 
     OLAPStatus pread(void* buf, size_t size, size_t offset);
     OLAPStatus write(const void* buf, size_t buf_size);
@@ -62,8 +64,9 @@ public:
         off_t res = -1;
 
         if (-1 == (res = lseek(_fd, 0, SEEK_CUR))) {
-            OLAP_LOG_WARNING("fail to tell file. [err=%m file_name='%s' fd=%d]",
-                             _file_name.c_str(), _fd);
+            char errmsg[64];
+            LOG(WARNING) << "fail to tell file. [err=" << strerror_r(errno, errmsg, 64)
+                         << " file_name='" << _file_name << "' fd=" << _fd << "]";
         }
 
         return res;
@@ -75,9 +78,10 @@ public:
         off_t res = -1;
 
         if (-1 == (res = lseek(_fd, offset, whence))) {
-            OLAP_LOG_WARNING("fail to seek file. [err=%m file_name='%s' fd=%d "
-                             "offset=%ld whence=%d]",
-                             _file_name.c_str(), _fd, offset, whence);
+            char errmsg[64];
+            LOG(WARNING) << "fail to seek file. [err=" << strerror_r(errno, errmsg, 64)
+                         << "file_name='" << _file_name
+                         << "' fd=" << _fd << " offset=" << offset << " whence=" << whence << "]";
         }
 
         return res;
@@ -96,14 +100,20 @@ public:
         SAFE_DELETE(file_desc);
     }
 
+    static Cache* get_fd_cache() {
+        return _s_fd_cache;
+    }
+
 private:
+    OLAPStatus _release();
+    static Cache* _s_fd_cache;
+
     int _fd;
     off_t _wr_length;
     const int64_t _cache_threshold = 1<<19;
     std::string _file_name;
     bool _is_using_cache;
     Cache::Handle* _cache_handle;
-    Cache* _fd_cache;
 };
 
 class FileHandlerWithBuf {
@@ -124,8 +134,9 @@ public:
     int32_t sync() {
         int32_t res = -1;
         if (0 != (res = ::fflush(_fp))) {
-            OLAP_LOG_WARNING("fail to fsync file. [err=%m file_name='%s']",
-                    _file_name.c_str());
+            char errmsg[64];
+            LOG(WARNING) << "fail to fsync file. [err= " << strerror_r(errno, errmsg, 64)
+                         << " file_name='" << _file_name << "']";
         } 
         return res;
     }
@@ -133,8 +144,9 @@ public:
     off_t tell() const {
         off_t res = -1;
         if (-1 == (res = ::ftell(_fp))) {
-            OLAP_LOG_WARNING("fail to tell file. [err=%m file_name='%s']",
-                    _file_name.c_str());
+            char errmsg[64];
+            LOG(WARNING) << "fail to tell file. [err= " << strerror_r(errno, errmsg, 64)
+                         << " file_name='" << _file_name << "']";
         }
         return res;
     }
@@ -144,9 +156,10 @@ public:
     off_t seek(off_t offset, int whence) {
         off_t res = -1;
         if (-1 == (res = ::fseek(_fp, offset, whence))) {
-            OLAP_LOG_WARNING("fail to seek file. [err=%m file_name='%s' "
-                    "offset=%ld whence=%d]",
-                    _file_name.c_str(), offset, whence);
+            char errmsg[64];
+            LOG(WARNING) << "fail to seek file. [err=" << strerror_r(errno, errmsg, 64)
+                         << " file_name='" << _file_name
+                         << "' offset=" << offset << " whence=" << whence << "]";
         }
         return res;
     }
@@ -262,13 +275,13 @@ OLAPStatus FileHeader<MessageType, ExtraType, FileHandlerType>::prepare(
 
     try {
         if (!_proto.SerializeToString(&_proto_string)) {
-            OLAP_LOG_WARNING("serialize file header to string error. [path='%s']",
-                             file_handler->file_name().c_str());
+            LOG(WARNING) << "serialize file header to string error. [path='"
+                         << file_handler->file_name() << "']";
             return OLAP_ERR_SERIALIZE_PROTOBUF_ERROR;
         }
     } catch (...) {
-        OLAP_LOG_WARNING("serialize file header to string error. [path='%s']",
-                         file_handler->file_name().c_str());
+        LOG(WARNING) << "serialize file header to string error. [path='"
+                     << file_handler->file_name() << "']";
         return OLAP_ERR_SERIALIZE_PROTOBUF_ERROR;
     }
 
@@ -294,22 +307,28 @@ OLAPStatus FileHeader<MessageType, ExtraType, FileHandlerType>::serialize(
     // 写入文件
     if (OLAP_SUCCESS != file_handler->pwrite(&_fixed_file_header,
             _fixed_file_header_size, 0)) {
-        OLAP_LOG_WARNING("fail to write fixed header to file. [file='%s' message='%m']",
-                         file_handler->file_name().c_str());
+        char errmsg[64];
+        LOG(WARNING) << "fail to write fixed header to file. [file='"
+                     << file_handler->file_name()
+                     << "' err=" << strerror_r(errno, errmsg, 64) << "]";
         return OLAP_ERR_IO_ERROR;
     }
 
     if (OLAP_SUCCESS != file_handler->pwrite(&_extra_fixed_header, sizeof(_extra_fixed_header),
             _fixed_file_header_size)) {
-        OLAP_LOG_WARNING("fail to write extra fixed header to file. [file='%s' message='%m']",
-                         file_handler->file_name().c_str());
+        char errmsg[64];
+        LOG(WARNING) << "fail to write extra fixed header to file. [file='"
+                     << file_handler->file_name()
+                     << "' err=" << strerror_r(errno, errmsg, 64) << "]";
         return OLAP_ERR_IO_ERROR;
     }
 
     if (OLAP_SUCCESS != file_handler->pwrite(_proto_string.c_str(), _proto_string.size(),
             _fixed_file_header_size + sizeof(_extra_fixed_header))) {
-        OLAP_LOG_WARNING("fail to write proto header to file. [file='%s' message='%m']",
-                         file_handler->file_name().c_str());
+        char errmsg[64];
+        LOG(WARNING) << "fail to write proto header to file. [file='"
+                     << file_handler->file_name()
+                     << "' err='" << strerror_r(errno, errmsg, 64) << "']";
         return OLAP_ERR_IO_ERROR;
     }
 
@@ -328,21 +347,23 @@ OLAPStatus FileHeader<MessageType, ExtraType, FileHandlerType>::unserialize(
 
     if (OLAP_SUCCESS != file_handler->pread(&_fixed_file_header,
                                             _fixed_file_header_size, 0)) {
-        OLAP_LOG_WARNING("fail to load header structure from file. [file='%s' message='%m']",
-                         file_handler->file_name().c_str());
+        char errmsg[64];
+        LOG(WARNING) << "fail to load header structure from file. file="
+                     << file_handler->file_name()
+                     << ", error=" << strerror_r(errno, errmsg, 64);
         return OLAP_ERR_IO_ERROR;
     }
 
     if (_fixed_file_header.magic_number != OLAP_FIX_HEADER_MAGIC_NUMBER) {
-        OLAP_LOG_TRACE("old fix header found, magic num = [%lu]",
-                       _fixed_file_header.magic_number);
-
+        VLOG(10) << "old fix header found, magic num=" << _fixed_file_header.magic_number;
         FixedFileHeader tmp_header;
 
         if (OLAP_SUCCESS != file_handler->pread(&tmp_header,
                                                 sizeof(tmp_header), 0)) {
-            OLAP_LOG_WARNING("fail to load header structure from file. [file='%s' message='%m']",
-                             file_handler->file_name().c_str());
+            char errmsg[64];
+            LOG(WARNING) << "fail to load header structure from file. file="
+                         << file_handler->file_name()
+                         << ", error=" << strerror_r(errno, errmsg, 64);
             return OLAP_ERR_IO_ERROR;
         }
 
@@ -356,41 +377,46 @@ OLAPStatus FileHeader<MessageType, ExtraType, FileHandlerType>::unserialize(
         _fixed_file_header_size = sizeof(tmp_header);
     }
 
-    OLAP_LOG_DEBUG("fix head loaded. [file_length = %lu, checksum = %d, "
-                   "protobuf_length = %lu, proto_checksum = %u, "
-                   "magic_number = %lu, version = %d",
-                   _fixed_file_header.file_length, _fixed_file_header.checksum,
-                   _fixed_file_header.protobuf_length, _fixed_file_header.protobuf_checksum,
-                   _fixed_file_header.magic_number, _fixed_file_header.version);
+    VLOG(3) << "fix head loaded. file_length=" << _fixed_file_header.file_length
+            << ", checksum=" << _fixed_file_header.checksum
+            << ", protobuf_length=" << _fixed_file_header.protobuf_length 
+            << ", magic_number=" << _fixed_file_header.magic_number
+            << ", version=" << _fixed_file_header.version;
 
     if (OLAP_SUCCESS != file_handler->pread(&_extra_fixed_header,
             sizeof(_extra_fixed_header), _fixed_file_header_size)) {
-        OLAP_LOG_WARNING("fail to load extra fixed header from file. [file='%s' message='%m']",
-                         file_handler->file_name().c_str());
+        char errmsg[64];
+        LOG(WARNING) << "fail to load extra fixed header from file. file="
+                     << file_handler->file_name()
+                     << ", error=" << strerror_r(errno, errmsg, 64);
         return OLAP_ERR_IO_ERROR;
     }
 
     std::unique_ptr<char[]> buf(new(std::nothrow) char[_fixed_file_header.protobuf_length]);
 
     if (NULL == buf.get()) {
-        OLAP_LOG_WARNING("malloc protobuf buf error. [file='%s' message='%m']",
-                         file_handler->file_name().c_str());
+        char errmsg[64];
+        LOG(WARNING) << "malloc protobuf buf error. file="
+                     << file_handler->file_name()
+                     << ", error=" << strerror_r(errno, errmsg, 64);
         return OLAP_ERR_MALLOC_ERROR;
     }
 
     if (OLAP_SUCCESS != file_handler->pread(buf.get(), _fixed_file_header.protobuf_length,
             _fixed_file_header_size + sizeof(_extra_fixed_header))) {
-        OLAP_LOG_WARNING("fail to load protobuf from file. [file='%s' message='%m']",
-                         file_handler->file_name().c_str());
+        char errmsg[64];
+        LOG(WARNING) << "fail to load protobuf from file. file="
+                     << file_handler->file_name()
+                     << ", error=" << strerror_r(errno, errmsg, 64);
         return OLAP_ERR_IO_ERROR;
     }
 
     real_file_length = file_handler->length();
 
     if (file_length() != static_cast<uint64_t>(real_file_length)) {
-        OLAP_LOG_WARNING("file length is not match. [file='%s' file_length=%lu"
-                         " real_file_length=%ld]",
-                         file_handler->file_name().c_str(), file_length(), real_file_length);
+        LOG(WARNING) << "file length is not match. file=" << file_handler->file_name()
+                     << ", file_length=" << file_length()
+                     << ", real_file_length=" << real_file_length;
         return OLAP_ERR_FILE_DATA_ERROR;
     }
 
@@ -399,10 +425,9 @@ OLAPStatus FileHeader<MessageType, ExtraType, FileHandlerType>::unserialize(
                                           buf.get(), _fixed_file_header.protobuf_length);
 
     if (real_protobuf_checksum != _fixed_file_header.protobuf_checksum) {
-        OLAP_LOG_WARNING("checksum is not match. [file='%s' expect=%d actual=%d]",
-                         file_handler->file_name().c_str(),
-                         _fixed_file_header.protobuf_checksum,
-                         real_protobuf_checksum);
+        LOG(WARNING) << "checksum is not match. file=" << file_handler->file_name()
+                     << ", expect=" << _fixed_file_header.protobuf_checksum
+                     << ", actual=" << real_protobuf_checksum;
         return OLAP_ERR_CHECKSUM_ERROR;
     }
 
@@ -410,12 +435,12 @@ OLAPStatus FileHeader<MessageType, ExtraType, FileHandlerType>::unserialize(
         std::string protobuf_str(buf.get(), _fixed_file_header.protobuf_length);
 
         if (!_proto.ParseFromString(protobuf_str)) {
-            OLAP_LOG_WARNING("fail to parse file content to protobuf object. [file='%s']",
-                             file_handler->file_name().c_str());
+            LOG(WARNING) << "fail to parse file content to protobuf object. file="
+                         << file_handler->file_name();
             return OLAP_ERR_PARSE_PROTOBUF_ERROR;
         }
     } catch (...) {
-        OLAP_LOG_WARNING("fail to load protobuf. [file='%s']", file_handler->file_name().c_str());
+        LOG(WARNING) << "fail to load protobuf. file='" << file_handler->file_name();
         return OLAP_ERR_PARSE_PROTOBUF_ERROR;
     }
 
@@ -429,19 +454,20 @@ OLAPStatus FileHeader<MessageType, ExtraType, FileHandlerType>::validate(
     OLAPStatus res = OLAP_SUCCESS;
 
     if (OLAP_SUCCESS != file_handler.open(filename.c_str(), O_RDONLY)) {
-        OLAP_LOG_WARNING("fail to open file. [file='%s' message='%m']",
-                         filename.c_str());
+        char errmsg[64];
+        LOG(WARNING) << "fail to open file. [file='" << filename
+                     << "' err=" << strerror_r(errno, errmsg, 64) << "]";
         return OLAP_ERR_IO_ERROR;
     }
 
     if (OLAP_SUCCESS != (res = unserialize(&file_handler))) {
-        OLAP_LOG_WARNING("unserialize file header error. [file='%s']", filename.c_str());
+        LOG(WARNING) << "unserialize file header error. [file='" << filename << "']";
         return res;
     }
 
     return OLAP_SUCCESS;
 }
 
-}  // namespace palo
+}  // namespace doris
 
-#endif // BDG_PALO_BE_SRC_OLAP_FILE_HELPER_H
+#endif // DORIS_BE_SRC_OLAP_FILE_HELPER_H

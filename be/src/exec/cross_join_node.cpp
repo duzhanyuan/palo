@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -29,7 +26,7 @@
 #include "util/debug_util.h"
 #include "util/runtime_profile.h"
 
-namespace palo {
+namespace doris {
 
 CrossJoinNode::CrossJoinNode(
     ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs)
@@ -40,18 +37,18 @@ Status CrossJoinNode::prepare(RuntimeState* state) {
     DCHECK(_join_op == TJoinOp::CROSS_JOIN);
     RETURN_IF_ERROR(BlockingJoinNode::prepare(state));
     _build_batch_pool.reset(new ObjectPool());
-    return Status::OK;
+    return Status::OK();
 }
 
 Status CrossJoinNode::close(RuntimeState* state) {
     // avoid double close
     if (is_closed()) {
-        return Status::OK;
+        return Status::OK();
     }
     _build_batches.reset();
     _build_batch_pool.reset();
     BlockingJoinNode::close(state);
-    return Status::OK;
+    return Status::OK();
 }
 
 Status CrossJoinNode::construct_build_side(RuntimeState* state) {
@@ -60,7 +57,7 @@ Status CrossJoinNode::construct_build_side(RuntimeState* state) {
 
     while (true) {
         RowBatch* batch = _build_batch_pool->add(
-                new RowBatch(child(1)->row_desc(), state->batch_size(), mem_tracker()));
+                new RowBatch(child(1)->row_desc(), state->batch_size(), mem_tracker().get()));
 
         RETURN_IF_CANCELLED(state);
         // TODO(zhaochun):
@@ -69,7 +66,7 @@ Status CrossJoinNode::construct_build_side(RuntimeState* state) {
         RETURN_IF_ERROR(child(1)->get_next(state, batch, &eos));
 
         // to prevent use too many memory
-        RETURN_IF_LIMIT_EXCEEDED(state);
+        RETURN_IF_LIMIT_EXCEEDED(state, "Cross join, while getting next from the child 1.");
 
         SCOPED_TIMER(_build_timer);
         _build_batches.add_row_batch(batch);
@@ -82,7 +79,7 @@ Status CrossJoinNode::construct_build_side(RuntimeState* state) {
         }
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 void CrossJoinNode::init_get_next(TupleRow* first_left_row) {
@@ -92,13 +89,14 @@ void CrossJoinNode::init_get_next(TupleRow* first_left_row) {
 Status CrossJoinNode::get_next(RuntimeState* state, RowBatch* output_batch, bool* eos) {
     // RETURN_IF_ERROR(exec_debug_action(TExecNodePhase::GETNEXT, state));
     RETURN_IF_CANCELLED(state);
+    *eos = false;
     // TOOD(zhaochun)
     // RETURN_IF_ERROR(state->check_query_state());
     SCOPED_TIMER(_runtime_profile->total_time_counter());
 
     if (reached_limit() || _eos) {
         *eos = true;
-        return Status::OK;
+        return Status::OK();
     }
 
     ScopedTimer<MonotonicStopWatch> timer(_left_child_timer);
@@ -142,7 +140,7 @@ Status CrossJoinNode::get_next(RuntimeState* state, RowBatch* output_batch, bool
         }
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 std::string CrossJoinNode::build_list_debug_string() {

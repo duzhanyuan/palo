@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,16 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_UTIL_JSON_UTIL_H
-#define BDG_PALO_BE_SRC_UTIL_JSON_UTIL_H
+#ifndef DORIS_BE_SRC_UTIL_JSON_UTIL_H
+#define DORIS_BE_SRC_UTIL_JSON_UTIL_H
+
+#include <string>
 
 #include <rapidjson/rapidjson.h>
 #include <rapidjson/document.h>
 
+#include "common/status.h"
 #include "util/pretty_printer.h"
 #include "util/template_util.h"
 
-namespace palo {
+namespace doris {
 
 /// ToJsonValue() converts 'value' into a rapidjson::Value in 'out_val'. The type of
 /// 'out_val' depends on the value of 'type'. If type != TUnit::NONE and 'value' is
@@ -61,6 +61,7 @@ ToJsonValue(const T& value, const TUnit::type unit, rapidjson::Document* documen
     }
 }
 
+std::string to_json(const Status& status);
 }
 
 #endif

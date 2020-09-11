@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,17 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXPRS_CASE_EXPR_H
-#define BDG_PALO_BE_SRC_QUERY_EXPRS_CASE_EXPR_H
+#ifndef DORIS_BE_SRC_QUERY_EXPRS_CASE_EXPR_H
+#define DORIS_BE_SRC_QUERY_EXPRS_CASE_EXPR_H
 
 #include <string>
 #include "expr.h"
+#include "common/object_pool.h"
 
-namespace llvm {
-class Function;
-}
-
-namespace palo {
+namespace doris {
 
 class TExprNode;
 
@@ -38,7 +32,6 @@ public:
     virtual Expr* clone(ObjectPool* pool) const override { 
         return pool->add(new CaseExpr(*this)); 
     }
-    virtual Status get_codegend_compute_fn(RuntimeState* state, llvm::Function** fn) override;
     virtual BooleanVal get_boolean_val(ExprContext* ctx, TupleRow* row);
     virtual TinyIntVal get_tiny_int_val(ExprContext* ctx, TupleRow* row);
     virtual SmallIntVal get_small_int_val(ExprContext* ctx, TupleRow* row);
@@ -49,12 +42,14 @@ public:
     virtual StringVal get_string_val(ExprContext* ctx, TupleRow* row);
     virtual DateTimeVal get_datetime_val(ExprContext* ctx, TupleRow* row);
     virtual DecimalVal get_decimal_val(ExprContext* ctx, TupleRow* row);
+    virtual DecimalV2Val get_decimalv2_val(ExprContext* ctx, TupleRow* row);
 
 protected:
     friend class Expr;
     friend class ComputeFunctions;
     friend class ConditionalFunctions;
     friend class DecimalOperators;
+    friend class DecimalV2Operators;
 
     CaseExpr(const TExprNode& node);
     virtual Status prepare(

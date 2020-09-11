@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_COMMON_ATOMIC_H
-#define BDG_PALO_BE_SRC_COMMON_ATOMIC_H
+#ifndef DORIS_BE_SRC_COMMON_ATOMIC_H
+#define DORIS_BE_SRC_COMMON_ATOMIC_H
 
 #include <algorithm>
 
@@ -27,7 +24,7 @@
 #include "gutil/atomicops.h"
 #include "gutil/macros.h"
 
-namespace palo {
+namespace doris {
 
 class AtomicUtil {
 public:
@@ -38,7 +35,11 @@ public:
     // should be:
     //  while (1) CpuWait();
     static ALWAYS_INLINE void cpu_wait() {
+#if (defined(__i386) || defined(__x86_64__))
         asm volatile("pause\n": : :"memory");
+#elif defined(__aarch64__)
+        asm volatile("yield\n" ::: "memory");
+#endif
     }
 
     /// Provides "barrier" semantics (see below) without a memory access.
@@ -200,10 +201,16 @@ public:
     /// Atomic store with "release" memory-ordering semantic.
     inline void store(T* val) { _ptr.store(reinterpret_cast<intptr_t>(val)); }
 
+    /// Store 'new_val' and return the previous value. Implies a Release memory barrier
+    /// (i.e. the same as Store()).
+    inline T* swap(T* val) {
+      return reinterpret_cast<T*>(_ptr.swap(reinterpret_cast<intptr_t>(val)));
+    }
+
 private:
     AtomicInt<intptr_t> _ptr;
 };
 
-} // end namespace palo
+} // end namespace doris
 
-#endif // BDG_PALO_BE_SRC_COMMON_ATOMIC_H
+#endif // DORIS_BE_SRC_COMMON_ATOMIC_H

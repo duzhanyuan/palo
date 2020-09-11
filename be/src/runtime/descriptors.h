@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,14 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_RUNTIME_DESCRIPTORS_H
-#define BDG_PALO_BE_RUNTIME_DESCRIPTORS_H
+#ifndef DORIS_BE_RUNTIME_DESCRIPTORS_H
+#define DORIS_BE_RUNTIME_DESCRIPTORS_H
 
-#include <vector>
-#include <tr1/unordered_map>
-#include <vector>
-#include <boost/scoped_ptr.hpp>
 #include <ostream>
+#include <unordered_map>
+#include <vector>
+
+#include <google/protobuf/repeated_field.h>
+#include <google/protobuf/stubs/common.h>
 
 #include "common/status.h"
 #include "common/global_types.h"
@@ -34,29 +32,18 @@
 #include "gen_cpp/Types_types.h"
 #include "runtime/types.h"
 
-namespace llvm {
-class Function;
-class PointerType;
-class StructType;
-};
+namespace doris {
 
-namespace palo {
-
-class LlvmCodeGen;
 class ObjectPool;
 class TDescriptorTable;
 class TSlotDescriptor;
-class TTable;
 class TTupleDescriptor;
 class Expr;
 class RuntimeState;
 class SchemaScanner;
-
-struct LlvmTupleStruct {
-    llvm::StructType* tuple_struct;
-    llvm::PointerType* tuple_ptr;
-    std::vector<int> indices;
-};
+class OlapTableSchemaParam;
+class PTupleDescriptor;
+class PSlotDescriptor;
 
 // Location information for null indicator bit for particular slot.
 // For non-nullable slots, the byte_offset will be 0 and the bit_mask will be 0.
@@ -66,10 +53,16 @@ struct LlvmTupleStruct {
 struct NullIndicatorOffset {
     int byte_offset;
     uint8_t bit_mask;  // to extract null indicator
+    uint8_t bit_offset; // only used to serialize, from 1 to 8
 
-    NullIndicatorOffset(int byte_offset, int bit_offset)
+    NullIndicatorOffset(int byte_offset, int bit_offset_)
         : byte_offset(byte_offset),
-          bit_mask(bit_offset == -1 ? 0 : 1 << (7 - bit_offset)) {
+        bit_mask(bit_offset_ == -1 ? 0 : 1 << (7 - bit_offset_)),
+        bit_offset(bit_offset_) {
+    }
+ 
+    bool equals(const NullIndicatorOffset& o) const {
+        return this->byte_offset == o.byte_offset && this->bit_mask == o.bit_mask;
     }
 
     std::string debug_string() const;
@@ -110,24 +103,28 @@ public:
     bool is_nullable() const {
         return _null_indicator_offset.bit_mask != 0;
     }
-    std::string col_name() const {
+
+    int slot_size() const {
+        return _slot_size;
+    }
+
+    const std::string& col_name() const {
         return _col_name;
     }
 
+    /// Return true if the physical layout of this descriptor matches the physical layout
+    /// of other_desc, but not necessarily ids.
+    bool layout_equals(const SlotDescriptor& other_desc) const;
+
+    void to_protobuf(PSlotDescriptor* pslot) const;
+
     std::string debug_string() const;
-
-    // Codegen for: bool IsNull(Tuple* tuple)
-    // The codegen function is cached.
-    llvm::Function* codegen_is_null(LlvmCodeGen*, llvm::StructType* tuple);
-
-    // Codegen for: void SetNull(Tuple* tuple) / SetNotNull
-    // The codegen function is cached.
-    llvm::Function* codegen_update_null(LlvmCodeGen*, llvm::StructType* tuple, bool set_null);
 
 private:
     friend class DescriptorTbl;
     friend class TupleDescriptor;
     friend class SchemaScanner;
+    friend class OlapTableSchemaParam;
 
     const SlotId _id;
     const TypeDescriptor _type;
@@ -140,6 +137,9 @@ private:
     // the idx of the slot in the tuple descriptor (0-based).
     // this is provided by the FE
     const int _slot_idx;
+    
+    // the byte size of this slot.
+    const int _slot_size;
 
     // the idx of the slot in the llvm codegen'd tuple struct
     // this is set by TupleDescriptor during codegen and takes into account
@@ -148,12 +148,8 @@ private:
 
     const bool _is_materialized;
 
-    // Cached codegen'd functions
-    llvm::Function* _is_null_fn;
-    llvm::Function* _set_not_null_fn;
-    llvm::Function* _set_null_fn;
-
     SlotDescriptor(const TSlotDescriptor& tdesc);
+    SlotDescriptor(const PSlotDescriptor& pdesc);
 };
 
 // Base class for table descriptors.
@@ -216,22 +212,12 @@ public :
 private :
 };
 
-// Descriptor for a KuduTable
-class KuduTableDescriptor : public TableDescriptor {
- public:
-  explicit KuduTableDescriptor(const TTableDescriptor& tdesc);
-  virtual std::string DebugString() const;
-  const std::string table_name() const { return table_name_; }
-  const std::vector<std::string>& key_columns() const { return key_columns_; }
-  const std::vector<std::string>& kudu_master_addresses() const {
-    return master_addresses_;
-  }
-
- private:
-  // native name of Kudu table
-  std::string table_name_;
-  std::vector<std::string> key_columns_;
-  std::vector<std::string> master_addresses_;
+class EsTableDescriptor : public TableDescriptor {
+public :
+    EsTableDescriptor(const TTableDescriptor& tdesc);
+    virtual ~EsTableDescriptor();
+    virtual std::string debug_string() const;
+private :
 };
 
 class MySQLTableDescriptor : public TableDescriptor {
@@ -305,24 +291,19 @@ public:
     TupleId id() const {
         return _id;
     }
+
+    /// Return true if the physical layout of this descriptor matches that of other_desc,
+    /// but not necessarily the id.
+    bool layout_equals(const TupleDescriptor& other_desc) const;
+
     std::string debug_string() const;
 
-    // Creates a typed struct description for llvm.  The layout of the struct is computed
-    // by the FE which includes the order of the fields in the resulting struct.
-    // Returns the struct type or NULL if the type could not be created.
-    // For example, the aggregation tuple for this query: select count(*), min(int_col_a)
-    // would map to:
-    // struct Tuple {
-    //   int8_t   null_byte;
-    //   int32_t  min_a;
-    //   int64_t  count_val;
-    // };
-    // The resulting struct definition is cached.
-    llvm::StructType* generate_llvm_struct(LlvmCodeGen* codegen);
+    void to_protobuf(PTupleDescriptor* ptuple) const;
 
 private:
     friend class DescriptorTbl;
     friend class SchemaScanner;
+    friend class OlapTableSchemaParam;
 
     const TupleId _id;
     TableDescriptor* _table_desc;
@@ -339,10 +320,12 @@ private:
     // True if _string_slots or _collection_slots have entries.
     bool _has_varlen_slots;
 
-    llvm::StructType* _llvm_struct; // cache for the llvm struct type for this tuple desc
-
     TupleDescriptor(const TTupleDescriptor& tdesc);
+    TupleDescriptor(const PTupleDescriptor& tdesc);
     void add_slot(SlotDescriptor* slot);
+
+    /// Returns slots in their physical order.
+    std::vector<SlotDescriptor*> slots_ordered_by_idx() const;
 };
 
 class DescriptorTbl {
@@ -362,9 +345,9 @@ public:
     std::string debug_string() const;
 
 private:
-    typedef std::tr1::unordered_map<TableId, TableDescriptor*> TableDescriptorMap;
-    typedef std::tr1::unordered_map<TupleId, TupleDescriptor*> TupleDescriptorMap;
-    typedef std::tr1::unordered_map<SlotId, SlotDescriptor*> SlotDescriptorMap;
+    typedef std::unordered_map<TableId, TableDescriptor*> TableDescriptorMap;
+    typedef std::unordered_map<TupleId, TupleDescriptor*> TupleDescriptorMap;
+    typedef std::unordered_map<SlotId, SlotDescriptor*> SlotDescriptorMap;
 
     TableDescriptorMap _tbl_desc_map;
     TupleDescriptorMap _tuple_desc_map;
@@ -388,6 +371,7 @@ public:
     // standard copy c'tor, made explicit here
     RowDescriptor(const RowDescriptor& desc) :
             _tuple_desc_map(desc._tuple_desc_map),
+            _tuple_idx_nullable_map(desc._tuple_idx_nullable_map),
             _tuple_idx_map(desc._tuple_idx_map),
             _has_varlen_slots(desc._has_varlen_slots) {
         _num_null_slots = 0;
@@ -399,6 +383,8 @@ public:
     }
 
     RowDescriptor(TupleDescriptor* tuple_desc, bool is_nullable);
+
+    RowDescriptor(const RowDescriptor& lhs_row_desc, const RowDescriptor& rhs_row_desc);
 
     // dummy descriptor, needed for the JNI EvalPredicate() function
     RowDescriptor() {}
@@ -439,6 +425,8 @@ public:
 
     // Populate row_tuple_ids with our ids.
     void to_thrift(std::vector<TTupleId>* row_tuple_ids);
+    void to_protobuf(
+        google::protobuf::RepeatedField<google::protobuf::int32 >* row_tuple_ids);
 
     // Return true if the tuple ids of this descriptor are a prefix
     // of the tuple ids of other_desc.
@@ -446,6 +434,14 @@ public:
 
     // Return true if the tuple ids of this descriptor match tuple ids of other desc.
     bool equals(const RowDescriptor& other_desc) const;
+
+    /// Return true if the physical layout of this descriptor matches the physical layout
+    /// of other_desc, but not necessarily the ids.
+    bool layout_equals(const RowDescriptor& other_desc) const;
+
+    /// Return true if the tuples of this descriptor are a prefix of the tuples of
+    /// other_desc. Tuples are compared by their physical layout and not by ids.
+    bool layout_is_prefix_of(const RowDescriptor& other_desc) const;
 
     std::string debug_string() const;
 

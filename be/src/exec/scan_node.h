@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXEC_SCAN_NODE_H
-#define BDG_PALO_BE_SRC_QUERY_EXEC_SCAN_NODE_H
+#ifndef DORIS_BE_SRC_QUERY_EXEC_SCAN_NODE_H
+#define DORIS_BE_SRC_QUERY_EXEC_SCAN_NODE_H
 
 #include <string>
 #include "exec/exec_node.h"
 #include "util/runtime_profile.h"
 #include "gen_cpp/PaloInternalService_types.h"
 
-namespace palo {
+namespace doris {
 
 class TScanRange;
 
@@ -52,11 +49,6 @@ class TScanRange;
 //   AverageIoMgrQueueCapcity - the average queue capacity in the io mgr for this node.
 //   AverageIoMgrQueueSize - the average queue size (for ready buffers) in the io mgr
 //     for this node.
-//
-//   AverageScannerThreadConcurrency - the average number of active scanner threads. A
-//     scanner thread is considered active if it is not blocked by IO. This number would
-//     be low (less than 1) for IO-bound queries. For cpu-bound queries, this number
-//     would be close to the max scanner threads allowed.
 //
 //   AverageScannerThreadConcurrency - the average number of active scanner threads. A
 //     scanner thread is considered active if it is not blocked by IO. This number would
@@ -116,9 +108,6 @@ public:
     RuntimeProfile::Counter* materialize_tuple_timer() const {
         return _materialize_tuple_timer;
     }
-    RuntimeProfile::Counter* scan_ranges_complete_counter() const {
-        return _scan_ranges_complete_counter;
-    }
     RuntimeProfile::ThreadCounters* scanner_thread_counters() const {
         return _scanner_thread_counters;
     }
@@ -131,7 +120,6 @@ public:
     static const std::string _s_per_read_thread_throughput_counter;
     static const std::string _s_num_disks_accessed_counter;
     static const std::string _s_materialize_tuple_timer;
-    static const std::string _s_scan_ranges_complete_counter;
     static const std::string _s_scanner_thread_counters_prefix;
     static const std::string _s_scanner_thread_total_wallclock_time;
     static const std::string _s_average_io_mgr_queue_capacity;
@@ -148,7 +136,6 @@ protected:
     RuntimeProfile::Counter* _per_read_thread_throughput_counter;
     RuntimeProfile::Counter* _num_disks_accessed_counter;
     RuntimeProfile::Counter* _materialize_tuple_timer;  // time writing tuple slots
-    RuntimeProfile::Counter* _scan_ranges_complete_counter;
     // Aggregated scanner thread counters
     RuntimeProfile::ThreadCounters* _scanner_thread_counters;
     RuntimeProfile::Counter* _num_scanner_threads_started_counter;

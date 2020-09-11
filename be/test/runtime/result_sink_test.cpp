@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -37,7 +39,7 @@
 #include "util/logging.h"
 #include "util/cpu_info.h"
 
-namespace palo {
+namespace doris {
 
 class ResultSinkTest : public testing::Test {
 public:
@@ -84,20 +86,20 @@ TEST_F(ResultSinkTest, init_normal) {
     row_batch.add_row();
     row_batch.commit_last_row();
     ASSERT_TRUE(sink.send(_runtime_state, &row_batch).ok());
-    ASSERT_TRUE(sink.close(_runtime_state, Status::OK).ok());
+    ASSERT_TRUE(sink.close(_runtime_state, Status::OK()).ok());
 }
 
 }
 
 int main(int argc, char** argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    if (!palo::config::init(conffile.c_str(), false)) {
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
         fprintf(stderr, "error read config file. \n");
         return -1;
     }
-    palo::init_glog("be-test");
+    doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
-    palo::CpuInfo::init();
+    doris::CpuInfo::init();
     return RUN_ALL_TESTS();
 }
 

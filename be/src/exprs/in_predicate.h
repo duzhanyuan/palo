@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,18 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXPRS_IN_PREDICATE_H
-#define BDG_PALO_BE_SRC_QUERY_EXPRS_IN_PREDICATE_H
+#ifndef DORIS_BE_SRC_QUERY_EXPRS_IN_PREDICATE_H
+#define DORIS_BE_SRC_QUERY_EXPRS_IN_PREDICATE_H
 
 #include <string>
 #include <boost/shared_ptr.hpp>
 #include <boost/unordered_set.hpp>
 #include "exprs/predicate.h"
-#include "exec/hash_join_node.h"
 #include "runtime/raw_value.h"
 #include "exprs/hybird_set.h"
 
-namespace palo {
+namespace doris {
 
 // has two method:
 // 1. construct from TExprNode
@@ -51,15 +47,11 @@ public:
 
     virtual BooleanVal get_boolean_val(ExprContext* context, TupleRow* row);
 
-    virtual Status get_codegend_compute_fn(RuntimeState* state, llvm::Function** fn) override {
-        return get_codegend_compute_fn_wrapper(state, fn);
-    }
-
     // this function add one item in hashset, not add to children.
     // if add to children, when List is long, copy is a expensive op.
     void insert(void* value);
 
-    HybirdSetBase* hybird_set() {
+    HybirdSetBase* hybird_set() const {
         return _hybird_set.get();
     }
 

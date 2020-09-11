@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -45,17 +42,16 @@
 // This is including a glog internal file.  We want this to expose the
 // function to get the stack trace.
 #include <glog/logging.h>
-#include <common/config.h>
 #undef MutexLock
 #endif
 
 // Define VLOG levels.  We want display per-row info less than per-file which
 // is less than per-query.  For now per-connection is the same as per-query.
 #define VLOG_CONNECTION VLOG(1)
-#define VLOG_RPC        VLOG(2)
+#define VLOG_RPC        VLOG(8)
 #define VLOG_QUERY      VLOG(1)
 #define VLOG_FILE       VLOG(2)
-#define VLOG_ROW        VLOG(3)
+#define VLOG_ROW        VLOG(10)
 #define VLOG_PROGRESS   VLOG(2)
 
 #define VLOG_CONNECTION_IS_ON VLOG_IS_ON(1)
@@ -64,5 +60,11 @@
 #define VLOG_FILE_IS_ON VLOG_IS_ON(2)
 #define VLOG_ROW_IS_ON VLOG_IS_ON(3)
 #define VLOG_PROGRESS_IS_ON VLOG_IS_ON(2)
+
+/// Define a wrapper around DCHECK for strongly typed enums that print a useful error
+/// message on failure.
+#define DCHECK_ENUM_EQ(a, b)                                               \
+  DCHECK(a == b) << "[ " #a " = " << static_cast<int>(a) << " , " #b " = " \
+                 << static_cast<int>(b) << " ]"
 
 #endif

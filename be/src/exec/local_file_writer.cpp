@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -16,7 +18,7 @@
 #include "exec/local_file_writer.h"
 #include "util/error_util.h"
 
-namespace palo {
+namespace doris {
 
 LocalFileWriter::LocalFileWriter(const std::string& path, int64_t start_offset)
         : _path(path), _start_offset(start_offset), _fp(nullptr) {
@@ -33,7 +35,7 @@ Status LocalFileWriter::open() {
         ss << "Open file failed. path=" << _path
             << ", errno= " << errno
             << ", description=" << get_str_err_msg();
-        return Status(ss.str());
+        return Status::InternalError(ss.str());
     }
 
     if (_start_offset != 0) {
@@ -43,11 +45,11 @@ Status LocalFileWriter::open() {
             ss << "Seek to start_offset failed. offset=" << _start_offset
                 << ", errno= " << errno
                 << ", description=" << get_str_err_msg();
-            return Status(ss.str());
+            return Status::InternalError(ss.str());
         }
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status LocalFileWriter::write(const uint8_t* buf, size_t buf_len, size_t* written_len) {
@@ -59,18 +61,19 @@ Status LocalFileWriter::write(const uint8_t* buf, size_t buf_len, size_t* writte
                 << ", path=" << _path
                 << ", failed with errno=" << errno
                 << ", description=" << get_str_err_msg();
-        return Status(error_msg.str());
+        return Status::InternalError(error_msg.str());
     }
 
     *written_len = bytes_written;
-    return Status::OK;
+    return Status::OK();
 }
 
-void LocalFileWriter::close() {
+Status LocalFileWriter::close() {
     if (_fp != nullptr) {
         fclose(_fp);
         _fp = nullptr;
     }
+    return Status::OK();
 }
 
-} // end namespace palo
+} // end namespace doris

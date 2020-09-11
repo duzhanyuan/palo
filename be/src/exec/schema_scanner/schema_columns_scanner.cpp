@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -24,9 +21,9 @@
 #include "runtime/primitive_type.h"
 #include "runtime/string_value.h"
 #include "runtime/datetime_value.h"
-#include "exec/schema_scanner/frontend_helper.h"
+#include "exec/schema_scanner/schema_helper.h"
 
-namespace palo {
+namespace doris {
 
 SchemaScanner::ColumnDesc SchemaColumnsScanner::_s_col_columns[] = {
     //   name,       type,          size,                     is_null
@@ -42,6 +39,7 @@ SchemaScanner::ColumnDesc SchemaColumnsScanner::_s_col_columns[] = {
     { "CHARACTER_OCTET_LENGTH",     TYPE_BIGINT, sizeof(int64_t), true },
     { "NUMERIC_PRECISION",          TYPE_BIGINT, sizeof(int64_t), true },
     { "NUMERIC_SCALE",              TYPE_BIGINT, sizeof(int64_t), true },
+    { "DATETIME_PRECISION",         TYPE_BIGINT, sizeof(int64_t), true },
     { "CHARACTER_SET_NAME", TYPE_VARCHAR, sizeof(StringValue),   true  },
     { "COLLATION_NAME",     TYPE_VARCHAR, sizeof(StringValue),   true  },
     { "COLUMN_TYPE",        TYPE_VARCHAR, sizeof(StringValue),   false },
@@ -49,6 +47,10 @@ SchemaScanner::ColumnDesc SchemaColumnsScanner::_s_col_columns[] = {
     { "EXTRA",              TYPE_VARCHAR, sizeof(StringValue),   false },
     { "PRIVILEGES",         TYPE_VARCHAR, sizeof(StringValue),   false },
     { "COLUMN_COMMENT",     TYPE_VARCHAR, sizeof(StringValue),   false },
+    { "COLUMN_SIZE",        TYPE_BIGINT,  sizeof(int64_t),   true },
+    { "DECIMAL_DIGITS",     TYPE_BIGINT,  sizeof(int64_t),   true },
+    { "GENERATION_EXPRESSION",     TYPE_VARCHAR, sizeof(StringValue),   true },
+    { "SRS_ID",             TYPE_BIGINT,  sizeof(int64_t),   true },
 };
 
 SchemaColumnsScanner::SchemaColumnsScanner() : 
@@ -63,25 +65,32 @@ SchemaColumnsScanner::~SchemaColumnsScanner() {
 
 Status SchemaColumnsScanner::start(RuntimeState *state) {
     if (!_is_init) {
-        return Status("schema columns scanner not inited.");
+        return Status::InternalError("schema columns scanner not inited.");
     }
     // get all database
     TGetDbsParams db_params;
     if (NULL != _param->db) {
         db_params.__set_pattern(*(_param->db));
     }
-    if (NULL != _param->user) {
-        db_params.__set_user(*(_param->user));
+    if (NULL != _param->current_user_ident) {
+        db_params.__set_current_user_ident(*_param->current_user_ident);
+    } else {
+        if (NULL != _param->user) {
+            db_params.__set_user(*(_param->user));
+        }
+        if (NULL != _param->user_ip) {
+            db_params.__set_user_ip(*(_param->user_ip));
+        }
     }
     
     if (NULL != _param->ip && 0 != _param->port) {
-        RETURN_IF_ERROR(FrontendHelper::get_db_names(*(_param->ip),
+        RETURN_IF_ERROR(SchemaHelper::get_db_names(*(_param->ip),
                     _param->port, db_params, &_db_result)); 
     } else {
-        return Status("IP or port dosn't exists");
+        return Status::InternalError("IP or port dosn't exists");
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 std::string SchemaColumnsScanner::type_to_string(TColumnDesc &desc) {
@@ -108,10 +117,17 @@ std::string SchemaColumnsScanner::type_to_string(TColumnDesc &desc) {
             } else {
                 return "varchar(20)";
             }
+        case TPrimitiveType::CHAR:
+            if (desc.__isset.columnLength) {
+                return "char(" + std::to_string(desc.columnLength) +")";
+            } else {
+                return "char(20)";
+            }
         case TPrimitiveType::DATE:
             return "date";
         case TPrimitiveType::DATETIME:
             return "datetime";
+        case TPrimitiveType::DECIMALV2:
         case TPrimitiveType::DECIMAL: {
             std::stringstream stream;
             stream << "decimal(";
@@ -138,20 +154,20 @@ Status SchemaColumnsScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
     // set all bit to not null
     memset((void *)tuple, 0, _tuple_desc->num_null_bytes());
 
-    // catalog
+    // TABLE_CATALOG
     {
         tuple->set_null(_tuple_desc->slots()[0]->null_indicator_offset());
     }
-    // schema
+    // TABLE_SCHEMA
     {
         void *slot = tuple->get_slot(_tuple_desc->slots()[1]->tuple_offset());
         StringValue* str_slot = reinterpret_cast<StringValue*>(slot);
-        std::string db_name = FrontendHelper::extract_db_name(_db_result.dbs[_db_index - 1]);
+        std::string db_name = SchemaHelper::extract_db_name(_db_result.dbs[_db_index - 1]);
         str_slot->ptr = (char *)pool->allocate(db_name.size());
         str_slot->len = db_name.size();
         memcpy(str_slot->ptr, db_name.c_str(), str_slot->len);
     }
-    // table
+    // TABLE_NAME
     {
         void *slot = tuple->get_slot(_tuple_desc->slots()[2]->tuple_offset());
         StringValue* str_slot = reinterpret_cast<StringValue*>(slot);
@@ -159,7 +175,7 @@ Status SchemaColumnsScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
         str_slot->len = _table_result.tables[_table_index - 1].length();
         memcpy(str_slot->ptr, _table_result.tables[_table_index - 1].c_str(), str_slot->len);
     }
-    // column
+    // COLUMN_NAME
     {
         void *slot = tuple->get_slot(_tuple_desc->slots()[3]->tuple_offset());
         StringValue* str_slot = reinterpret_cast<StringValue*>(slot);
@@ -203,27 +219,54 @@ Status SchemaColumnsScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
     }
     // CHARACTER_OCTET_LENGTH
     {
-        tuple->set_null(_tuple_desc->slots()[9]->null_indicator_offset());
+        int data_type = _desc_result.columns[_column_index].columnDesc.columnType;
+        if (data_type == TPrimitiveType::VARCHAR || data_type == TPrimitiveType::CHAR) {
+            void *slot = tuple->get_slot(_tuple_desc->slots()[9]->tuple_offset());
+            int64_t* str_slot = reinterpret_cast<int64_t*>(slot);
+            if (_desc_result.columns[_column_index].columnDesc.__isset.columnLength) {
+                *str_slot = _desc_result.columns[_column_index].columnDesc.columnLength;
+            } else {
+                tuple->set_null(_tuple_desc->slots()[9]->null_indicator_offset());
+            }     
+        } else {
+            tuple->set_null(_tuple_desc->slots()[9]->null_indicator_offset());
+        }
     }
     // NUMERIC_PRECISION
     {
-        tuple->set_null(_tuple_desc->slots()[10]->null_indicator_offset());
+        void *slot = tuple->get_slot(_tuple_desc->slots()[10]->tuple_offset());
+        int64_t* str_slot = reinterpret_cast<int64_t*>(slot);
+        if (_desc_result.columns[_column_index].columnDesc.__isset.columnPrecision) {
+            *str_slot = _desc_result.columns[_column_index].columnDesc.columnPrecision;
+        } else {
+            tuple->set_null(_tuple_desc->slots()[10]->null_indicator_offset());
+        }
     }
     // NUMERIC_SCALE
     {
-        tuple->set_null(_tuple_desc->slots()[11]->null_indicator_offset());
+        void *slot = tuple->get_slot(_tuple_desc->slots()[11]->tuple_offset());
+        int64_t* str_slot = reinterpret_cast<int64_t*>(slot);
+        if (_desc_result.columns[_column_index].columnDesc.__isset.columnScale) {
+            *str_slot = _desc_result.columns[_column_index].columnDesc.columnScale;
+        } else {
+            tuple->set_null(_tuple_desc->slots()[11]->null_indicator_offset());
+        }
     }
-    // CHARACTER_SET_NAME
+    // DATETIME_PRECISION
     {
         tuple->set_null(_tuple_desc->slots()[12]->null_indicator_offset());
     }
-    // COLLATION_NAME
+    // CHARACTER_SET_NAME
     {
         tuple->set_null(_tuple_desc->slots()[13]->null_indicator_offset());
     }
+    // COLLATION_NAME
+    {
+        tuple->set_null(_tuple_desc->slots()[14]->null_indicator_offset());
+    }
     // COLUMN_TYPE
     {
-        void *slot = tuple->get_slot(_tuple_desc->slots()[14]->tuple_offset());
+        void *slot = tuple->get_slot(_tuple_desc->slots()[15]->tuple_offset());
         StringValue* str_slot = reinterpret_cast<StringValue*>(slot);
         std::string buffer = type_to_string(_desc_result.columns[_column_index].columnDesc);
         str_slot->len = buffer.length();
@@ -232,7 +275,7 @@ Status SchemaColumnsScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
     }
     // COLUMN_KEY
     {
-        void *slot = tuple->get_slot(_tuple_desc->slots()[15]->tuple_offset());
+        void *slot = tuple->get_slot(_tuple_desc->slots()[16]->tuple_offset());
         StringValue* str_slot = reinterpret_cast<StringValue*>(slot);
         str_slot->len = strlen("") + 1;
         str_slot->ptr = (char *)pool->allocate(str_slot->len);
@@ -240,7 +283,7 @@ Status SchemaColumnsScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
     }
     // EXTRA
     {
-        void *slot = tuple->get_slot(_tuple_desc->slots()[16]->tuple_offset());
+        void *slot = tuple->get_slot(_tuple_desc->slots()[17]->tuple_offset());
         StringValue* str_slot = reinterpret_cast<StringValue*>(slot);
         str_slot->len = strlen("") + 1;
         str_slot->ptr = (char *)pool->allocate(str_slot->len);
@@ -248,7 +291,7 @@ Status SchemaColumnsScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
     }
     // PRIVILEGES
     {
-        void *slot = tuple->get_slot(_tuple_desc->slots()[17]->tuple_offset());
+        void *slot = tuple->get_slot(_tuple_desc->slots()[18]->tuple_offset());
         StringValue* str_slot = reinterpret_cast<StringValue*>(slot);
         str_slot->len = strlen("") + 1;
         str_slot->ptr = (char *)pool->allocate(str_slot->len);
@@ -256,34 +299,69 @@ Status SchemaColumnsScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
     }
     // COLUMN_COMMENT
     {
-        void *slot = tuple->get_slot(_tuple_desc->slots()[18]->tuple_offset());
+        void *slot = tuple->get_slot(_tuple_desc->slots()[19]->tuple_offset());
         StringValue* str_slot = reinterpret_cast<StringValue*>(slot);
         str_slot->ptr = 
             (char *)pool->allocate(_desc_result.columns[_column_index].comment.length());
         str_slot->len = _desc_result.columns[_column_index].comment.length();
         memcpy(str_slot->ptr, _desc_result.columns[_column_index].comment.c_str(), str_slot->len);
     }
+    // COLUMN_SIZE
+    {
+        void *slot = tuple->get_slot(_tuple_desc->slots()[20]->tuple_offset());
+        int64_t* str_slot = reinterpret_cast<int64_t*>(slot);
+        if (_desc_result.columns[_column_index].columnDesc.__isset.columnLength) {
+            *str_slot = _desc_result.columns[_column_index].columnDesc.columnLength;
+        } else {
+            tuple->set_null(_tuple_desc->slots()[20]->null_indicator_offset());
+        }
+    }
+    // DECIMAL_DIGITS
+    {
+        void *slot = tuple->get_slot(_tuple_desc->slots()[21]->tuple_offset());
+        int64_t* str_slot = reinterpret_cast<int64_t*>(slot);
+        if (_desc_result.columns[_column_index].columnDesc.__isset.columnScale) {
+            *str_slot = _desc_result.columns[_column_index].columnDesc.columnScale;
+        } else {
+            tuple->set_null(_tuple_desc->slots()[21]->null_indicator_offset());
+        }
+    }
+    // GENERATION_EXPRESSION
+    {
+        tuple->set_null(_tuple_desc->slots()[23]->null_indicator_offset());
+    }
+    // SRS_ID
+    {
+        tuple->set_null(_tuple_desc->slots()[23]->null_indicator_offset());
+    }
     _column_index++;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SchemaColumnsScanner::get_new_desc() {
     TDescribeTableParams desc_params;
     desc_params.__set_db(_db_result.dbs[_db_index - 1]);
     desc_params.__set_table_name(_table_result.tables[_table_index++]);
-    if (NULL != _param->user) {
-        desc_params.__set_user(*(_param->user));
+    if (NULL != _param->current_user_ident) {
+        desc_params.__set_current_user_ident(*(_param->current_user_ident));
+    } else {
+        if (NULL != _param->user) {
+            desc_params.__set_user(*(_param->user));
+        }
+        if (NULL != _param->user_ip) {
+            desc_params.__set_user_ip(*(_param->user_ip));
+        }
     }
 
     if (NULL != _param->ip && 0 != _param->port) {
-        RETURN_IF_ERROR(FrontendHelper::describe_table(*(_param->ip),
+        RETURN_IF_ERROR(SchemaHelper::describe_table(*(_param->ip),
                 _param->port, desc_params, &_desc_result)); 
     } else {
-        return Status("IP or port dosn't exists");
+        return Status::InternalError("IP or port dosn't exists");
     }
     _column_index = 0;
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SchemaColumnsScanner::get_new_table() {
@@ -292,26 +370,33 @@ Status SchemaColumnsScanner::get_new_table() {
     if (NULL != _param->table) {
         table_params.__set_pattern(*(_param->table));
     }
-    if (NULL != _param->user) {
-        table_params.__set_user(*(_param->user));
+    if (NULL != _param->current_user_ident) {
+        table_params.__set_current_user_ident(*(_param->current_user_ident));
+    } else {
+        if (NULL != _param->user) {
+            table_params.__set_user(*(_param->user));
+        }
+        if (NULL != _param->user_ip) {
+            table_params.__set_user_ip(*(_param->user_ip));
+        }
     }
 
     if (NULL != _param->ip && 0 != _param->port) {
-        RETURN_IF_ERROR(FrontendHelper::get_table_names(*(_param->ip),
+        RETURN_IF_ERROR(SchemaHelper::get_table_names(*(_param->ip),
                 _param->port, table_params, &_table_result)); 
     } else {
-        return Status("IP or port dosn't exists");
+        return Status::InternalError("IP or port dosn't exists");
     }
     _table_index = 0;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SchemaColumnsScanner::get_next_row(Tuple *tuple, MemPool *pool, bool *eos) {
     if (!_is_init) {
-        return Status("use this class before inited.");
+        return Status::InternalError("use this class before inited.");
     }
     if (NULL == tuple || NULL == pool || NULL == eos) {
-        return Status("input parameter is NULL.");
+        return Status::InternalError("input parameter is NULL.");
     }
     while (_column_index >= _desc_result.columns.size()) {
         if (_table_index >= _table_result.tables.size()) {
@@ -319,7 +404,7 @@ Status SchemaColumnsScanner::get_next_row(Tuple *tuple, MemPool *pool, bool *eos
                 RETURN_IF_ERROR(get_new_table());
             } else {
                 *eos = true;
-                return Status::OK;
+                return Status::OK();
             }
         } else {
             RETURN_IF_ERROR(get_new_desc());

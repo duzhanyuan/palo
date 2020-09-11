@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -20,39 +17,27 @@
 
 #include "runtime/test_env.h"
 #include "util/disk_info.h"
-#include "util/palo_metrics.h"
+#include "util/doris_metrics.h"
 
 using boost::shared_ptr;
 
-namespace palo {
-
-boost::scoped_ptr<MetricGroup> TestEnv::_s_static_metrics;
+namespace doris {
 
 TestEnv::TestEnv() {
-    if (_s_static_metrics == NULL) {
-        _s_static_metrics.reset(new MetricGroup("test_env"));
-        PaloMetrics::create_metrics(_s_static_metrics.get());
-    }
-    _exec_env.reset(new ExecEnv);
-    _exec_env->init_for_tests();
+    _exec_env.reset(new ExecEnv());
+    // _exec_env->init_for_tests();
     _io_mgr_tracker.reset(new MemTracker(-1));
     _block_mgr_parent_tracker.reset(new MemTracker(-1));
-    _exec_env->disk_io_mgr()->init(_io_mgr_tracker.get());
-    init_metrics();
-    _tmp_file_mgr.reset(new TmpFileMgr);
-    _tmp_file_mgr->init(_metrics.get());
-}
-
-void TestEnv::init_metrics() {
-    _metrics.reset(new MetricGroup("test_env"));
+    _exec_env->disk_io_mgr()->init(_io_mgr_tracker);
+    _tmp_file_mgr.reset(new TmpFileMgr());
+    _tmp_file_mgr->init();
 }
 
 void TestEnv::init_tmp_file_mgr(const std::vector<std::string>& tmp_dirs,
         bool one_dir_per_device) {
     // Need to recreate metrics to avoid error when registering metric twice.
-    init_metrics();
-    _tmp_file_mgr.reset(new TmpFileMgr);
-    _tmp_file_mgr->init_custom(tmp_dirs, one_dir_per_device, _metrics.get());
+    _tmp_file_mgr.reset(new TmpFileMgr());
+    _tmp_file_mgr->init_custom(tmp_dirs, one_dir_per_device);
 }
 
 TestEnv::~TestEnv() {
@@ -62,33 +47,32 @@ TestEnv::~TestEnv() {
     _exec_env.reset();
     _io_mgr_tracker.reset();
     _tmp_file_mgr.reset();
-    _metrics.reset();
 }
 
 RuntimeState* TestEnv::create_runtime_state(int64_t query_id) {
     TExecPlanFragmentParams plan_params = TExecPlanFragmentParams();
     plan_params.params.query_id.hi = 0;
     plan_params.params.query_id.lo = query_id;
-    return new RuntimeState(plan_params, TQueryOptions(), "", _exec_env.get());
+    return new RuntimeState(plan_params, TQueryOptions(), TQueryGlobals(), _exec_env.get());
 }
 
 Status TestEnv::create_query_state(int64_t query_id, int max_buffers, int block_size,
         RuntimeState** runtime_state) {
     *runtime_state = create_runtime_state(query_id);
     if (*runtime_state == NULL) {
-        return Status("Unexpected error creating RuntimeState");
+        return Status::InternalError("Unexpected error creating RuntimeState");
     }
 
     shared_ptr<BufferedBlockMgr2> mgr;
     RETURN_IF_ERROR(BufferedBlockMgr2::create(
-                *runtime_state, _block_mgr_parent_tracker.get(),
+                *runtime_state, _block_mgr_parent_tracker,
                 (*runtime_state)->runtime_profile(), _tmp_file_mgr.get(),
                 calculate_mem_tracker(max_buffers, block_size), block_size, &mgr));
     (*runtime_state)->set_block_mgr2(mgr);
     // (*runtime_state)->_block_mgr = mgr;
 
     _query_states.push_back(shared_ptr<RuntimeState>(*runtime_state));
-    return Status::OK;
+    return Status::OK();
 }
 
 Status TestEnv::create_query_states(int64_t start_query_id, int num_mgrs,
@@ -100,7 +84,7 @@ Status TestEnv::create_query_states(int64_t start_query_id, int num_mgrs,
                     &runtime_state));
         runtime_states->push_back(runtime_state);
     }
-    return Status::OK;
+    return Status::OK();
 }
 
 void TestEnv::tear_down_query_states() {
@@ -115,4 +99,4 @@ int64_t TestEnv::calculate_mem_tracker(int max_buffers, int block_size) {
     return max_buffers * static_cast<int64_t>(block_size);
 }
 
-} // end namespace palo
+} // end namespace doris

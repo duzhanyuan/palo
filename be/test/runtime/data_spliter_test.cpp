@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -27,8 +29,9 @@
 #include "gen_cpp/DataSinks_types.h"
 #include "gen_cpp/Types_types.h"
 #include "olap/olap_main.cpp"
+#include "util/file_utils.h"
 
-namespace palo {
+namespace doris {
 
 class DataSplitTest : public testing::Test {
 public:
@@ -261,23 +264,23 @@ TEST_F(DataSplitTest, NoData) {
         batch.commit_last_row();
     }
     ASSERT_TRUE(spliter.send(_state, &batch).ok());
-    ASSERT_TRUE(spliter.close(_state, Status::OK).ok());
+    ASSERT_TRUE(spliter.close(_state, Status::OK()).ok());
 }
 
 }
 
 int main(int argc, char** argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    if (!palo::config::init(conffile.c_str(), false)) {
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
         fprintf(stderr, "error read config file. \n");
         return -1;
     }
     // 覆盖be.conf中的配置
-    palo::config::storage_root_path = "./test_run/mini_load";
-    palo::create_dirs(palo::config::storage_root_path);
-    palo::touch_all_singleton();
+    doris::config::storage_root_path = "./test_run/mini_load";
+    doris::FileUtils::create_dir(doris::config::storage_root_path);
+    doris::touch_all_singleton();
 
-    palo::CpuInfo::init();
+    doris::CpuInfo::init();
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

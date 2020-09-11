@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -20,7 +17,7 @@
 
 #include "exprs/hybird_set.h"
 
-namespace palo {
+namespace doris {
 
 HybirdSetBase* HybirdSetBase::create_set(PrimitiveType type) {
     switch (type) {
@@ -51,6 +48,9 @@ HybirdSetBase* HybirdSetBase::create_set(PrimitiveType type) {
 
     case TYPE_DECIMAL:
         return new(std::nothrow) HybirdSet<DecimalValue>();
+
+    case TYPE_DECIMALV2:
+        return new(std::nothrow) HybirdSet<DecimalV2Value>();
 
     case TYPE_LARGEINT:
         return new(std::nothrow) HybirdSet<__int128>();

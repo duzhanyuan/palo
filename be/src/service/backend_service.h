@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,16 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SERVICE_BACKEND_SERVICE_H
-#define BDG_PALO_BE_SERVICE_BACKEND_SERVICE_H
+#ifndef DORIS_BE_SERVICE_BACKEND_SERVICE_H
+#define DORIS_BE_SERVICE_BACKEND_SERVICE_H
 
+#include <map>
 #include <memory>
-#include "common/status.h"
-#include "gen_cpp/BackendService.h"
-#include "agent/agent_server.h"
+#include <time.h>
 #include <thrift/protocol/TDebugProtocol.h>
 
-namespace palo {
+#include "agent/agent_server.h"
+#include "common/status.h"
+#include "gen_cpp/BackendService.h"
+#include "gen_cpp/TDorisExternalService.h"
+#include "gen_cpp/DorisExternalService_types.h"
+
+namespace doris {
 
 class ExecEnv;
 class ThriftServer;
@@ -55,9 +57,6 @@ class TClientRequest;
 class TExecRequest;
 class TSessionState;
 class TQueryOptions;
-class TPullLoadSubTaskInfo;
-class TFetchPullLoadTaskInfoResult;
-class TFetchAllPullLoadTaskInfosResult;
 class TExportTaskRequest;
 class TExportStatusResult;
 
@@ -69,13 +68,13 @@ public:
     BackendService(ExecEnv* exec_env);
 
     virtual ~BackendService() {
+        // _is_stop = true;
+        // _keep_alive_reaper->join();
     }
 
     // NOTE: now we do not support multiple backend in one process
     static Status create_service(
         ExecEnv* exec_env, int port, ThriftServer** server);
-
-    static Status create_rpc_service(ExecEnv* exec_env);
 
     // Agent service
     virtual void submit_tasks(
@@ -101,7 +100,7 @@ public:
 
     virtual void submit_etl_task(TAgentResult& result,
                                  const TMiniLoadEtlTaskRequest& request) {
-        VLOG_ROW << "submit_etl_task. request  is "
+        VLOG_RPC << "submit_etl_task. request is "
             << apache::thrift::ThriftDebugString(request).c_str();
         _agent_server->submit_etl_task(result, request);
     }
@@ -116,7 +115,7 @@ public:
         _agent_server->delete_etl_files(result, request);
     }
 
-    // PaloServer service
+    // DorisServer service
     virtual void exec_plan_fragment(TExecPlanFragmentResult& return_val,
                                     const TExecPlanFragmentParams& params);
 
@@ -129,34 +128,33 @@ public:
     virtual void fetch_data(TFetchDataResult& return_val,
                             const TFetchDataParams& params);
 
-    virtual void register_pull_load_task(TStatus& status,
-                                         const TUniqueId& tid,
-                                         int num_senders) override;
-
-    virtual void deregister_pull_load_task(TStatus& status,
-                                           const TUniqueId& tid) override;
-
-    virtual void report_pull_load_sub_task_info(
-        TStatus& status, const TPullLoadSubTaskInfo& task_info) override;
-
-    virtual void fetch_pull_load_task_info(
-        TFetchPullLoadTaskInfoResult& result, const TUniqueId& id) override;
-
-    virtual void fetch_all_pull_load_task_infos(TFetchAllPullLoadTaskInfosResult& result) override;
-
     void submit_export_task(TStatus& t_status, const TExportTaskRequest& request) override;
 
     void get_export_status(TExportStatusResult& result, const TUniqueId& task_id) override;
 
     void erase_export_task(TStatus& t_status, const TUniqueId& task_id) override;
 
-private:
-    Status start_plan_fragment_execution(const TExecPlanFragmentParams& exec_params);
+    virtual void get_tablet_stat(TTabletStatResult& result) override;
 
+    virtual void submit_routine_load_task(TStatus& t_status, const std::vector<TRoutineLoadTask>& tasks) override;
+
+    // used for external service, open means start the scan procedure
+    virtual void open_scanner(TScanOpenResult& result_, const TScanOpenParams& params);
+
+    // used for external service, external use getNext to fetch data batch after batch until eos = true
+    virtual void get_next(TScanBatchResult& result_, const TScanNextBatchParams& params);
+
+    // used for external service, close some context and release resource related with this context
+    virtual void close_scanner(TScanCloseResult& result_, const TScanCloseParams& params);
+
+private:
+
+    Status start_plan_fragment_execution(const TExecPlanFragmentParams& exec_params);
     ExecEnv* _exec_env;
     std::unique_ptr<AgentServer> _agent_server;
+
 };
 
-} // namespace palo
+} // namespace doris
 
-#endif // BDG_PALO_BE_SERVICE_BACKEND_SERVICE_H
+#endif // DORIS_BE_SERVICE_BACKEND_SERVICE_H

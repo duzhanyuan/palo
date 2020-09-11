@@ -13,6 +13,9 @@ using std::iterator_traits;
 #include <limits>
 using std::numeric_limits;
 
+using std::unordered_map;
+using std::unordered_set;
+
 #include "gutil/integral_types.h"
 #include <common/logging.h>
 #include "gutil/logging-inl.h"
@@ -118,7 +121,7 @@ namespace {
 // the following overloads:
 // - vector<string>           - for better performance
 // - map<string, string>      - to change append semantics
-// - hash_map<string, string> - to change append semantics
+// - unordered_map<string, string> - to change append semantics
 template <typename Container, typename Splitter>
 void AppendToImpl(Container* container, Splitter splitter) {
   Container c = splitter;  // Calls implicit conversion operator.
@@ -138,7 +141,7 @@ void AppendToImpl(vector<string>* container, Splitter splitter) {
   }
 }
 
-// Here we define two AppendToImpl() overloads for map<> and hash_map<>. Both of
+// Here we define two AppendToImpl() overloads for map<> and unordered_map<>. Both of
 // these overloads call through to this AppendToMap() function. This is needed
 // because inserting a duplicate key into a map does NOT overwrite the previous
 // value, which was not the behavior of the split1 Split*() functions. Consider
@@ -150,7 +153,7 @@ void AppendToImpl(vector<string>* container, Splitter splitter) {
 //   ASSERT_EQ(m["a"], "1");  // <-- "a" has value "1" not "2".
 //
 // Due to this behavior of map::insert, we can't rely on a normal std::inserter
-// for a maps. Instead, maps and hash_maps need to be special cased to implement
+// for a maps. Instead, maps and unordered_maps need to be special cased to implement
 // the desired append semantic of inserting an existing value overwrites the
 // previous value.
 //
@@ -172,7 +175,7 @@ void AppendToImpl(map<string, string>* map_container, Splitter splitter) {
 }
 
 template <typename Splitter>
-void AppendToImpl(hash_map<string, string>* map_container, Splitter splitter) {
+void AppendToImpl(unordered_map<string, string>* map_container, Splitter splitter) {
   AppendToMap(map_container, splitter);
 }
 
@@ -415,12 +418,12 @@ void SplitStringUsing(const string& full,
                       const char* delim,
                       vector<string>* result) {
   result->reserve(result->size() + CalculateReserveForVector(full, delim));
-  std::back_insert_iterator< vector<string> > it(*result);
+  std::back_insert_iterator< vector<string>> it(*result);
   SplitStringToIteratorUsing(full, delim, it);
 }
 
 void SplitStringToHashsetUsing(const string& full, const char* delim,
-                               hash_set<string>* result) {
+                               unordered_set<string>* result) {
   AppendTo(result, strings::Split(full, AnyOf(delim), strings::SkipEmpty()));
 }
 
@@ -435,7 +438,7 @@ void SplitStringToMapUsing(const string& full, const char* delim,
 }
 
 void SplitStringToHashmapUsing(const string& full, const char* delim,
-                               hash_map<string, string>* result) {
+                               unordered_map<string, string>* result) {
   AppendTo(result, strings::Split(full, AnyOf(delim), strings::SkipEmpty()));
 }
 
@@ -568,28 +571,28 @@ void SplitStringWithEscapingToIterator(const string& src,
 void SplitStringWithEscaping(const string &full,
                              const strings::CharSet& delimiters,
                              vector<string> *result) {
-  std::back_insert_iterator< vector<string> > it(*result);
+  std::back_insert_iterator< vector<string>> it(*result);
   SplitStringWithEscapingToIterator(full, delimiters, false, &it);
 }
 
 void SplitStringWithEscapingAllowEmpty(const string &full,
                                        const strings::CharSet& delimiters,
                                        vector<string> *result) {
-  std::back_insert_iterator< vector<string> > it(*result);
+  std::back_insert_iterator< vector<string>> it(*result);
   SplitStringWithEscapingToIterator(full, delimiters, true, &it);
 }
 
 void SplitStringWithEscapingToSet(const string &full,
                                   const strings::CharSet& delimiters,
                                   set<string> *result) {
-  std::insert_iterator< set<string> > it(*result, result->end());
+  std::insert_iterator< set<string>> it(*result, result->end());
   SplitStringWithEscapingToIterator(full, delimiters, false, &it);
 }
 
 void SplitStringWithEscapingToHashset(const string &full,
                                       const strings::CharSet& delimiters,
-                                      hash_set<string> *result) {
-  std::insert_iterator< hash_set<string> > it(*result, result->end());
+                                      unordered_set<string> *result) {
+  std::insert_iterator< unordered_set<string>> it(*result, result->end());
   SplitStringWithEscapingToIterator(full, delimiters, false, &it);
 }
 
@@ -997,7 +1000,7 @@ bool SplitStringIntoKeyValues(const string& line,
 bool SplitStringIntoKeyValuePairs(const string& line,
                                   const string& key_value_delimiters,
                                   const string& key_value_pair_delimiters,
-                                  vector<pair<string, string> >* kv_pairs) {
+                                  vector<pair<string, string>>* kv_pairs) {
   kv_pairs->clear();
 
   vector<string> pairs;

@@ -21,34 +21,33 @@
 
 #include <sys/time.h>
 
-#include <common/logging.h>
+#include <ctime>
 #include <string>
-using std::string;
 
 #if defined(__APPLE__)
 #include <mach/clock.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 
+#include <glog/logging.h>
+
 #include "gutil/once.h"
-#endif  // defined(__APPLE__)
+#endif  // #if defined(__APPLE__)
 
 #include "gutil/integral_types.h"
-
-#define NANOS_PER_SEC  1000000000ll
-#define NANOS_PER_MICRO      1000ll
-#define MICROS_PER_SEC    1000000ll
-#define MICROS_PER_MILLI     1000ll
-#define MILLIS_PER_SEC       1000ll
 
 typedef double WallTime;
 
 // Append result to a supplied string.
 // If an error occurs during conversion 'dst' is not modified.
 void StringAppendStrftime(std::string* dst,
-                                 const char* format,
-                                 time_t when,
-                                 bool local);
+                          const char* format,
+                          time_t when,
+                          bool local);
+
+// Return the given timestamp (in seconds since the epoch) as a string suitable
+// for user display in the current timezone.
+std::string TimestampAsString(time_t timestamp_secs);
 
 // Return the local time as a string suitable for user display.
 std::string LocalTimeAsString();
@@ -58,10 +57,10 @@ std::string LocalTimeAsString();
 // time. If local is set to true, the same exact result as
 // WallTime_Parse is returned.
 bool WallTime_Parse_Timezone(const char* time_spec,
-                                    const char* format,
-                                    const struct tm* default_time,
-                                    bool local,
-                                    WallTime* result);
+                             const char* format,
+                             const struct tm* default_time,
+                             bool local,
+                             WallTime* result);
 
 // Return current time in seconds as a WallTime.
 WallTime WallTime_Now();
@@ -79,14 +78,19 @@ extern void InitializeTimebaseInfo();
 inline void GetCurrentTime(mach_timespec_t* ts) {
   clock_serv_t cclock;
   host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-  clock_get_time(cclock, ts);
+  CHECK_EQ(KERN_SUCCESS, clock_get_time(cclock, ts));
   mach_port_deallocate(mach_task_self(), cclock);
 }
 
 inline MicrosecondsInt64 GetCurrentTimeMicros() {
   mach_timespec_t ts;
   GetCurrentTime(&ts);
-  return ts.tv_sec * MICROS_PER_SEC + ts.tv_nsec / NANOS_PER_MICRO;
+  // 'tv_sec' is just 4 bytes on macOS, need to be careful not
+  // to convert to nanos until we've moved to a larger int.
+  MicrosecondsInt64 micros_from_secs = ts.tv_sec;
+  micros_from_secs *= 1000 * 1000;
+  micros_from_secs += ts.tv_nsec / 1000;
+  return micros_from_secs;
 }
 
 inline int64_t GetMonoTimeNanos() {
@@ -101,7 +105,7 @@ inline int64_t GetMonoTimeNanos() {
 }
 
 inline MicrosecondsInt64 GetMonoTimeMicros() {
-  return GetMonoTimeNanos() / NANOS_PER_MICRO;
+  return GetMonoTimeNanos() / 1000;
 }
 
 inline MicrosecondsInt64 GetThreadCpuTimeMicros() {
@@ -127,8 +131,7 @@ inline MicrosecondsInt64 GetThreadCpuTimeMicros() {
     return 0;
   }
 
-  return thread_info_data.user_time.seconds * MICROS_PER_SEC +
-      thread_info_data.user_time.microseconds;
+  return thread_info_data.user_time.seconds * 1000000 + thread_info_data.user_time.microseconds;
 }
 
 #else
@@ -136,7 +139,13 @@ inline MicrosecondsInt64 GetThreadCpuTimeMicros() {
 inline MicrosecondsInt64 GetClockTimeMicros(clockid_t clock) {
   timespec ts;
   clock_gettime(clock, &ts);
-  return ts.tv_sec * MICROS_PER_SEC + ts.tv_nsec / NANOS_PER_MICRO;
+  // 'tv_sec' is usually 8 bytes, but the spec says it only
+  // needs to be 'a signed int'. Moved to a 64 bit var before
+  // converting to micros to be safe.
+  MicrosecondsInt64 micros_from_secs = ts.tv_sec;
+  micros_from_secs *= 1000 * 1000;
+  micros_from_secs += ts.tv_nsec / 1000;
+  return micros_from_secs;
 }
 
 #endif // defined(__APPLE__)
@@ -153,12 +162,32 @@ inline MicrosecondsInt64 GetCurrentTimeMicros() {
 }
 
 // Returns the time since some arbitrary reference point, measured in microseconds.
-// Guaranteed to be monotonic (and therefore useful for measuring intervals)
+// Guaranteed to be monotonic (and therefore useful for measuring intervals),
+// but the underlying clock is subject for adjustment by adjtime() and
+// the kernel's NTP discipline. For example, the underlying clock might
+// be slewed a bit to reach some reference point, time to time adjusted to be
+// of the desired result frequency, etc.
 inline MicrosecondsInt64 GetMonoTimeMicros() {
 #if defined(__APPLE__)
+  // In fact, walltime_internal::GetMonoTimeMicros() is implemented via
+  // mach_absolute_time() which is not actually affected by adjtime()
+  // or the NTP discipline. On Darwin 16.0 and newer (macOS 10.12 and newer),
+  // it's the same as clock_gettime(CLOCK_UPTIME_RAW); see 'man clock_gettime'
+  // on macOS 10.12 and newer.
   return walltime_internal::GetMonoTimeMicros();
 #else
   return walltime_internal::GetClockTimeMicros(CLOCK_MONOTONIC);
+#endif  // defined(__APPLE__)
+}
+
+// Returns the time since some arbitrary reference point, measured in microseconds.
+// Guaranteed to be monotonic and not affected at all by frequency and time
+// adjustments such as adjtime() or the kernel's NTP discipline.
+inline MicrosecondsInt64 GetMonoTimeMicrosRaw() {
+#if defined(__APPLE__)
+  return walltime_internal::GetMonoTimeMicros();
+#else
+  return walltime_internal::GetClockTimeMicros(CLOCK_MONOTONIC_RAW);
 #endif  // defined(__APPLE__)
 }
 
@@ -182,5 +211,6 @@ class CycleClock {
   CycleClock();
 };
 
-#include "gutil/cycleclock-inl.h"  // inline method bodies
+// inline method bodies
+#include "gutil/cycleclock-inl.h"  // IWYU pragma: export
 #endif  // GUTIL_WALLTIME_H_

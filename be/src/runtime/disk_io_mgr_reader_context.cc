@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -20,7 +17,7 @@
 
 #include "runtime/disk_io_mgr_internal.h"
 
-namespace palo {
+namespace doris {
 
 using std::string;
 using std::stringstream;
@@ -155,10 +152,9 @@ DiskIoMgr::RequestContext::RequestContext(DiskIoMgr* parent, int num_disks) :
 }
 
 // Resets this object.
-// void DiskIoMgr::RequestContext::reset(MemTracker* tracker) {
-void DiskIoMgr::RequestContext::reset(MemTracker* tracker) {
+void DiskIoMgr::RequestContext::reset(std::shared_ptr<MemTracker> tracker) {
     DCHECK_EQ(_state, Inactive);
-    _status = Status::OK;
+    _status = Status::OK();
 
     _bytes_read_counter = NULL;
     _read_timer = NULL;
@@ -166,7 +162,7 @@ void DiskIoMgr::RequestContext::reset(MemTracker* tracker) {
     _disks_accessed_bitmap = NULL;
 
     _state = Active;
-    _mem_tracker = tracker;
+    _mem_tracker = std::move(tracker);
 
     _num_unstarted_scan_ranges = 0;
     _num_disks_with_ranges = 0;
@@ -326,5 +322,5 @@ bool DiskIoMgr::RequestContext::validate() const {
     return true;
 }
 
-} // namespace palo
+} // namespace doris
 

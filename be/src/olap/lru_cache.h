@@ -1,32 +1,23 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
+// Copyright (c) 2011 The LevelDB Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//   http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-
-#ifndef BDG_PALO_BE_SRC_OLAP_LRU_CACHE_H
-#define BDG_PALO_BE_SRC_OLAP_LRU_CACHE_H
+#ifndef DORIS_BE_SRC_OLAP_LRU_CACHE_H
+#define DORIS_BE_SRC_OLAP_LRU_CACHE_H
 
 #include <stdint.h>
 #include <string.h>
 
 #include <string>
+#include <vector>
 
 #include <rapidjson/document.h>
 
 #include "olap/olap_common.h"
-#include "olap/utils.h"
+#include "util/mutex.h"
+#include "util/slice.h"
 
-namespace palo {
+namespace doris {
 
 #define OLAP_CACHE_STRING_TO_BUF(cur, str, r_len)   \
     do{ \
@@ -96,9 +87,9 @@ namespace palo {
             }
 
             // Change this slice to refer to an empty array
-            void clear() { 
+            void clear() {
                 _data = NULL;
-                _size = 0; 
+                _size = 0;
             }
 
             // Drop the first "n" bytes from this slice.
@@ -157,6 +148,12 @@ namespace palo {
             size_t _size;
     };
 
+    // The entry with smaller CachePriority will evict firstly
+    enum class CachePriority {
+        NORMAL = 0,
+        DURABLE = 1
+    };
+
     class Cache {
         public:
             Cache() {}
@@ -181,7 +178,8 @@ namespace palo {
             virtual Handle* insert(
                     const CacheKey& key,
                     void* value, size_t charge,
-                    void (*deleter)(const CacheKey& key, void* value)) = 0;
+                    void (*deleter)(const CacheKey& key, void* value),
+                    CachePriority priority = CachePriority::NORMAL) = 0;
 
             // If the cache has no mapping for "key", returns NULL.
             //
@@ -200,6 +198,10 @@ namespace palo {
             // REQUIRES: handle must not have been released yet.
             // REQUIRES: handle must have been returned by a method on *this.
             virtual void* value(Handle* handle) = 0;
+
+            // Return the value in Slice format encapsulated in the given handle
+            // returned by a successful lookup()
+            virtual Slice value_slice(Handle* handle) = 0;
 
             // If the cache contains entry for key, erase it.  Note that the
             // underlying entry will be kept around until all existing handles
@@ -225,10 +227,6 @@ namespace palo {
             virtual void get_cache_status(rapidjson::Document* document) = 0;
 
         private:
-            void _lru_remove(Handle* e);
-            void _lru_append(Handle* e);
-            void _unref(Handle* e);
-
             DISALLOW_COPY_AND_ASSIGN(Cache);
     };
 
@@ -245,6 +243,7 @@ namespace palo {
         bool in_cache;      // Whether entry is in the cache.
         uint32_t refs;
         uint32_t hash;      // Hash of key(); used for fast sharding and comparisons
+        CachePriority priority = CachePriority::NORMAL;
         char key_data[1];   // Beginning of key
 
         CacheKey key() const {
@@ -256,11 +255,17 @@ namespace palo {
                 return CacheKey(key_data, key_length);
             }
         }
+
+        void free() {
+            (*deleter)(key(), value);
+            ::free(this);
+        }
+
     } LRUHandle;
 
-    // We provide our own simple hash table since it removes a whole bunch
+    // We provide our own simple hash tablet since it removes a whole bunch
     // of porting hacks and is also faster than some of the built-in hash
-    // table implementations in some of the compiler/runtime combinations
+    // tablet implementations in some of the compiler/runtime combinations
     // we have tested.  E.g., readrandom speeds up by ~5% over the g++
     // 4.4.3's builtin hashtable.
 
@@ -281,7 +286,7 @@ namespace palo {
             LRUHandle* remove(const CacheKey& key, uint32_t hash);
 
         private:
-            // The table consists of an array of buckets where each bucket is
+            // The tablet consists of an array of buckets where each bucket is
             // a linked list of cache entries that hash into the bucket.
             uint32_t _length;
             uint32_t _elems;
@@ -311,7 +316,8 @@ namespace palo {
                     uint32_t hash,
                     void* value,
                     size_t charge,
-                    void (*deleter)(const CacheKey& key, void* value));
+                    void (*deleter)(const CacheKey& key, void* value),
+                    CachePriority priority = CachePriority::NORMAL);
             Cache::Handle* lookup(const CacheKey& key, uint32_t hash);
             void release(Cache::Handle* handle);
             void erase(const CacheKey& key, uint32_t hash);
@@ -333,15 +339,15 @@ namespace palo {
         private:
             void _lru_remove(LRUHandle* e);
             void _lru_append(LRUHandle* list, LRUHandle* e);
-            void _ref(LRUHandle* e);
-            void _unref(LRUHandle* e);
-            bool _finish_erase(LRUHandle* e);
+            bool _unref(LRUHandle* e);
+            void _evict_from_lru(size_t charge, std::vector<LRUHandle*>* deleted);
+            void _evict_one_entry(LRUHandle* e);
 
             // Initialized before use.
             size_t _capacity;
 
             // _mutex protects the following state.
-            MutexLock _mutex;
+            Mutex _mutex;
             size_t _usage;
             uint64_t _last_id;
 
@@ -349,10 +355,6 @@ namespace palo {
             // lru.prev is newest entry, lru.next is oldest entry.
             // Entries have refs==1 and in_cache==true.
             LRUHandle _lru;
-
-            // Dummy head of in-use list.
-            // Entries are in use by clients, and have refs >= 2 and in_cache==true.
-            LRUHandle _in_use;
 
             HandleTable _table;
 
@@ -372,11 +374,13 @@ namespace palo {
                     const CacheKey& key,
                     void* value,
                     size_t charge,
-                    void (*deleter)(const CacheKey& key, void* value));
+                    void (*deleter)(const CacheKey& key, void* value),
+                    CachePriority priority = CachePriority::NORMAL);
             virtual Handle* lookup(const CacheKey& key);
             virtual void release(Handle* handle);
             virtual void erase(const CacheKey& key);
             virtual void* value(Handle* handle);
+            Slice value_slice(Handle* handle) override;
             virtual uint64_t new_id();
             virtual void prune();
             virtual size_t get_memory_usage();
@@ -387,10 +391,10 @@ namespace palo {
             static uint32_t _shard(uint32_t hash);
 
             LRUCache _shards[kNumShards];
-            MutexLock _id_mutex;
+            Mutex _id_mutex;
             uint64_t _last_id;
     };
 
-}  // namespace palo
+}  // namespace doris
 
-#endif // BDG_PALO_BE_SRC_OLAP_LRU_CACHE_H
+#endif // DORIS_BE_SRC_OLAP_LRU_CACHE_H

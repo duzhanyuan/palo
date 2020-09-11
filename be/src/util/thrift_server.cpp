@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -35,8 +32,12 @@
 #include <thrift/transport/TSocket.h>
 #include <thrift/transport/TServerSocket.h>
 
-namespace palo {
+#include "util/doris_metrics.h"
 
+namespace doris {
+
+DEFINE_GAUGE_METRIC_PROTOTYPE_3ARG(thrift_current_connections, MetricUnit::CONNECTIONS, "Number of currently active connections");
+DEFINE_COUNTER_METRIC_PROTOTYPE_3ARG(thrift_connections_total, MetricUnit::CONNECTIONS, "Total connections made over the lifetime of this server");
 
 // Helper class that starts a server in a separate thread, and handles
 // the inter-thread communication to monitor whether it started
@@ -119,7 +120,7 @@ Status ThriftServer::ThriftServerEventProcessor::start_and_wait_for_server() {
                << _thrift_server->_port << ") did not start within "
                << TIMEOUT_MS << "ms";
             LOG(ERROR) << ss.str();
-            return Status(ss.str());
+            return Status::InternalError(ss.str());
         }
     }
 
@@ -130,10 +131,10 @@ Status ThriftServer::ThriftServerEventProcessor::start_and_wait_for_server() {
         ss << "ThriftServer '" << _thrift_server->_name << "' (on port: "
            << _thrift_server->_port << ") did not start correctly ";
         LOG(ERROR) << ss.str();
-        return Status(ss.str());
+        return Status::InternalError(ss.str());
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 void ThriftServer::ThriftServerEventProcessor::supervise() {
@@ -225,10 +226,8 @@ void* ThriftServer::ThriftServerEventProcessor::createContext(
         _thrift_server->_session_handler->session_start(*_session_key);
     }
 
-    if (_thrift_server->_metrics_enabled) {
-        _thrift_server->_num_current_connections_metric->increment(1L);
-        _thrift_server->_total_connections_metric->increment(1L);
-    }
+    _thrift_server->thrift_connections_total->increment(1L);
+    _thrift_server->thrift_current_connections->increment(1L);
 
     // Store the _session_key in the per-client context to avoid recomputing
     // it. If only this were accessible from RPC method calls, we wouldn't have to
@@ -257,16 +256,13 @@ void ThriftServer::ThriftServerEventProcessor::deleteContext(
         _thrift_server->_session_keys.erase(_session_key);
     }
 
-    if (_thrift_server->_metrics_enabled) {
-        _thrift_server->_num_current_connections_metric->increment(-1L);
-    }
+    _thrift_server->thrift_current_connections->increment(-1L);
 }
 
 ThriftServer::ThriftServer(
         const std::string& name,
         const boost::shared_ptr<apache::thrift::TProcessor>& processor,
         int port,
-        MetricGroup* metrics,
         int num_worker_threads,
         ServerType server_type) :
             _started(false),
@@ -278,18 +274,9 @@ ThriftServer::ThriftServer(
             _server(NULL),
             _processor(processor),
             _session_handler(NULL) {
-    if (metrics != NULL) {
-        _metrics_enabled = true;
-        std::stringstream count_ss;
-        count_ss << "palo_be.thrift_server." << name << ".connections_in_use";
-        _num_current_connections_metric =
-            metrics->AddGauge(count_ss.str(), 0L);
-        std::stringstream max_ss;
-        max_ss << "palo_be.thrift_server." << name << ".total_connections";
-        _total_connections_metric = metrics->AddCounter(max_ss.str(), 0L);
-    } else {
-        _metrics_enabled = false;
-    }
+    _thrift_server_metric_entity = DorisMetrics::instance()->metric_registry()->register_entity(std::string("thrift_server.") + name, {{"name", name}});
+    INT_GAUGE_METRIC_REGISTER(_thrift_server_metric_entity, thrift_current_connections);
+    INT_COUNTER_METRIC_REGISTER(_thrift_server_metric_entity, thrift_connections_total);
 }
 
 Status ThriftServer::start() {
@@ -354,7 +341,7 @@ Status ThriftServer::start() {
         std::stringstream error_msg;
         error_msg << "Unsupported server type: " << _server_type;
         LOG(ERROR) << error_msg.str();
-        return Status(error_msg.str());
+        return Status::InternalError(error_msg.str());
     }
 
     boost::shared_ptr<ThriftServer::ThriftServerEventProcessor> event_processor(
@@ -366,7 +353,11 @@ Status ThriftServer::start() {
     LOG(INFO) << "ThriftServer '" << _name << "' started on port: " << _port;
 
     DCHECK(_started);
-    return Status::OK;
+    return Status::OK();
+}
+
+void ThriftServer::stop() {
+    _server->stop();
 }
 
 void ThriftServer::join() {

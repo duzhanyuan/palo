@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -15,19 +17,18 @@
 
 #include <gtest/gtest.h>
 
-#include "olap/column_file/byte_buffer.h"
-#include "olap/column_file/out_stream.h"
-#include "olap/column_file/in_stream.h"
-#include "olap/column_file/file_stream.h"
-#include "olap/column_file/run_length_byte_writer.h"
-#include "olap/column_file/run_length_byte_reader.h"
-#include "olap/column_file/column_reader.h"
-#include "olap/column_file/stream_index_reader.h"
-#include "olap/column_file/stream_index_writer.h"
+#include "olap/byte_buffer.h"
+#include "olap/out_stream.h"
+#include "olap/in_stream.h"
+#include "olap/file_stream.h"
+#include "olap/rowset/run_length_byte_writer.h"
+#include "olap/rowset/run_length_byte_reader.h"
+#include "olap/rowset/column_reader.h"
+#include "olap/stream_index_reader.h"
+#include "olap/stream_index_writer.h"
 #include "util/logging.h"
 
-namespace palo {
-namespace column_file {
+namespace doris {
 
 using namespace testing;
 
@@ -45,7 +46,7 @@ TEST(TestStream, UncompressOutStream) {
 
     ASSERT_EQ(out_stream->output_buffers().size(), 1);
 
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
+    std::vector<StorageByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
     ASSERT_EQ((*it)->position(), 0);
     StreamHead head;
     (*it)->get((char *)&head, sizeof(head));
@@ -77,12 +78,11 @@ TEST(TestStream, UncompressOutStream2) {
 
     ASSERT_EQ(out_stream->output_buffers().size(), 2);
 
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
-    for (; it != out_stream->output_buffers().end(); ++it) {
-        ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->limit());
-        inputs.push_back(tmp_byte_buffer);
+    std::vector<StorageByteBuffer*> inputs;
+    for (const auto& it : out_stream->output_buffers()) {
+        inputs.push_back(StorageByteBuffer::reference_buffer(it, 0, it->limit()));
     }
+
     std::vector<uint64_t> offsets;
     offsets.push_back(0);
     offsets.push_back(sizeof(StreamHead) + OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE);
@@ -108,6 +108,9 @@ TEST(TestStream, UncompressOutStream2) {
 
     SAFE_DELETE(out_stream);
     SAFE_DELETE(in_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 TEST(TestStream, UncompressOutStream3) {
@@ -129,11 +132,9 @@ TEST(TestStream, UncompressOutStream3) {
 
     ASSERT_EQ(out_stream->output_buffers().size(), 2);
 
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
-    for (; it != out_stream->output_buffers().end(); ++it) {
-        ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->limit());
-        inputs.push_back(tmp_byte_buffer);
+    std::vector<StorageByteBuffer*> inputs;
+    for (const auto& it : out_stream->output_buffers()) {
+        inputs.push_back(StorageByteBuffer::reference_buffer(it, 0, it->limit()));
     }
 
     std::vector<uint64_t> offsets;
@@ -160,9 +161,12 @@ TEST(TestStream, UncompressOutStream3) {
 
     ASSERT_NE(in_stream->read(&data), OLAP_SUCCESS);
 
+    SAFE_DELETE(in_stream);
     SAFE_DELETE(out_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
-
 
 TEST(TestStream, UncompressInStream) {
     // write data
@@ -175,11 +179,10 @@ TEST(TestStream, UncompressInStream) {
     out_stream->flush();
 
     // read data
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
+    std::vector<StorageByteBuffer*> inputs;
+    const auto& it = out_stream->output_buffers().begin();
     ASSERT_NE(it, out_stream->output_buffers().end());
-    ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
-    inputs.push_back(tmp_byte_buffer);
+    inputs.push_back(StorageByteBuffer::reference_buffer(*it, 0, (*it)->capacity()));
 
     std::vector<uint64_t> offsets;
     offsets.assign(inputs.size(), 0);
@@ -197,13 +200,16 @@ TEST(TestStream, UncompressInStream) {
     ASSERT_EQ(data, 0x5a);
 
     SAFE_DELETE(in_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 // the length after compress must be smaller than origal stream, then the compressor will be called. 
 TEST(TestStream, CompressOutStream) {
     // write data
     OutStream *out_stream = 
-            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lzo_compress);
+            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lz4_compress);
     ASSERT_TRUE(out_stream != NULL);
     ASSERT_TRUE(out_stream->_compressor != NULL);
 
@@ -217,12 +223,13 @@ TEST(TestStream, CompressOutStream) {
 
     //ASSERT_EQ(out_stream->output_buffers().size(), 1);
 
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
+    std::vector<StorageByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
 
     StreamHead head;
     (*it)->get((char *)&head, sizeof(head));
     ASSERT_EQ(head.type, StreamHead::COMPRESSED);
-    ASSERT_EQ(head.length, 49);
+    // if lzo, this should be 49
+    ASSERT_EQ(51, head.length);
 
     SAFE_DELETE_ARRAY(write_data);
     SAFE_DELETE(out_stream);
@@ -231,7 +238,7 @@ TEST(TestStream, CompressOutStream) {
 TEST(TestStream, CompressOutStream2) {
     // write data
     OutStream *out_stream = 
-            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lzo_compress);
+            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lz4_compress);
     ASSERT_TRUE(out_stream != NULL);
     ASSERT_TRUE(out_stream->_compressor != NULL);
 
@@ -241,20 +248,19 @@ TEST(TestStream, CompressOutStream2) {
     out_stream->write(0x5a);
     out_stream->flush();
 
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
-    for (; it != out_stream->output_buffers().end(); ++it) {
-        ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->limit());
-        inputs.push_back(tmp_byte_buffer);
+    std::vector<StorageByteBuffer*> inputs;
+    for (const auto& it : out_stream->output_buffers()) {
+        inputs.push_back(StorageByteBuffer::reference_buffer(it, 0, it->limit()));
     }
+
     std::vector<uint64_t> offsets;
     offsets.push_back(0);
-    offsets.push_back(57);
+    offsets.push_back(59); // if lzo, this shoudl be 57
     InStream *in_stream = 
             new (std::nothrow) InStream(&inputs, 
                                         offsets, 
                                         out_stream->get_stream_length(), 
-                                        lzo_decompress, 
+                                        lz4_decompress, 
                                         out_stream->get_total_buffer_size());
 
     char data;
@@ -267,14 +273,18 @@ TEST(TestStream, CompressOutStream2) {
 
     ASSERT_NE(in_stream->read(&data), OLAP_SUCCESS);
 
+    SAFE_DELETE(in_stream);
     SAFE_DELETE(out_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 
 TEST(TestStream, CompressOutStream3) {
     // write data
     OutStream *out_stream = 
-            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lzo_compress);
+            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lz4_compress);
     ASSERT_TRUE(out_stream != NULL);
     ASSERT_TRUE(out_stream->_compressor != NULL);
 
@@ -288,12 +298,11 @@ TEST(TestStream, CompressOutStream3) {
     out_stream->write(write_data, sizeof(write_data));
     out_stream->flush();
 
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
-    for (; it != out_stream->output_buffers().end(); ++it) {
-        ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->limit());
-        inputs.push_back(tmp_byte_buffer);
+    std::vector<StorageByteBuffer*> inputs;
+    for (const auto& it : out_stream->output_buffers()) {
+        inputs.push_back(StorageByteBuffer::reference_buffer(it, 0, it->limit()));
     }
+
     std::vector<uint64_t> offsets;
     offsets.push_back(0);
     offsets.push_back(57);
@@ -301,7 +310,7 @@ TEST(TestStream, CompressOutStream3) {
             new (std::nothrow) InStream(&inputs, 
                                         offsets, 
                                         out_stream->get_stream_length(), 
-                                        lzo_decompress, 
+                                        lz4_decompress, 
                                         out_stream->get_total_buffer_size());
 
     char data;
@@ -316,14 +325,18 @@ TEST(TestStream, CompressOutStream3) {
 
     ASSERT_NE(in_stream->read(&data), OLAP_SUCCESS);
 
+    SAFE_DELETE(in_stream);
     SAFE_DELETE(out_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 //test for _slice() in [while (len > 0 && m_current_range < m_inputs.size())]
 TEST(TestStream, CompressOutStream4) {
     // write data
     OutStream *out_stream = 
-            new(std::nothrow) OutStream(18, lzo_compress);
+            new(std::nothrow) OutStream(18, lz4_compress);
     ASSERT_TRUE(out_stream != NULL);
     ASSERT_TRUE(out_stream->_compressor != NULL);
 
@@ -340,12 +353,11 @@ TEST(TestStream, CompressOutStream4) {
     }
     out_stream->flush();
 
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
-    for (; it != out_stream->output_buffers().end(); ++it) {
-        ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->limit());
-        inputs.push_back(tmp_byte_buffer);
+    std::vector<StorageByteBuffer*> inputs;
+    for (const auto& it : out_stream->output_buffers()) {
+        inputs.push_back(StorageByteBuffer::reference_buffer(it, 0, it->limit()));
     }
+
     std::vector<uint64_t> offsets;
     offsets.push_back(0);
     offsets.push_back(16);
@@ -353,7 +365,7 @@ TEST(TestStream, CompressOutStream4) {
             new (std::nothrow) InStream(&inputs, 
                                         offsets, 
                                         out_stream->get_stream_length(), 
-                                        lzo_decompress, 
+                                        lz4_decompress, 
                                         out_stream->get_total_buffer_size());
 
     char data;
@@ -375,13 +387,17 @@ TEST(TestStream, CompressOutStream4) {
 
     ASSERT_NE(in_stream->read(&data), OLAP_SUCCESS);
 
+    SAFE_DELETE(in_stream);
     SAFE_DELETE(out_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 TEST(TestStream, CompressMassOutStream) {
     // write data
     OutStream *out_stream = 
-            new(std::nothrow) OutStream(100, lzo_compress);
+            new(std::nothrow) OutStream(100, lz4_compress);
     ASSERT_TRUE(out_stream != NULL);
     ASSERT_TRUE(out_stream->_compressor != NULL);
 
@@ -396,20 +412,18 @@ TEST(TestStream, CompressMassOutStream) {
     //out_stream->write(100);
     out_stream->flush();
 
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
-    for (; it != out_stream->output_buffers().end(); ++it) {
-        ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->limit());
-        inputs.push_back(tmp_byte_buffer);
+    std::vector<StorageByteBuffer*> inputs;
+    for (const auto& it : out_stream->output_buffers()) {
+        inputs.push_back(StorageByteBuffer::reference_buffer(it, 0, it->limit()));
     }
     std::vector<uint64_t> offsets;
     offsets.push_back(0);
-    offsets.push_back(17);
+    offsets.push_back(19); // if lzo, this should be 17
     InStream *in_stream = 
             new (std::nothrow) InStream(&inputs, 
                                         offsets, 
                                         out_stream->get_stream_length(), 
-                                        lzo_decompress, 
+                                        lz4_decompress, 
                                         out_stream->get_total_buffer_size());
     SAFE_DELETE(out_stream);
 
@@ -426,12 +440,15 @@ TEST(TestStream, CompressMassOutStream) {
     ASSERT_NE(in_stream->read(&data), OLAP_SUCCESS);
 
     SAFE_DELETE(in_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 TEST(TestStream, CompressInStream) {
     // write data
     OutStream *out_stream = 
-            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lzo_compress);
+            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lz4_compress);
     ASSERT_TRUE(out_stream != NULL);
     ASSERT_TRUE(out_stream->_compressor != NULL);
         
@@ -442,10 +459,10 @@ TEST(TestStream, CompressInStream) {
     out_stream->flush();
 
     // read data
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
+    std::vector<StorageByteBuffer*> inputs;
+    std::vector<StorageByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
     ASSERT_NE(it, out_stream->output_buffers().end());
-    ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
+    StorageByteBuffer *tmp_byte_buffer = StorageByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
     inputs.push_back(tmp_byte_buffer);
 
     std::vector<uint64_t> offsets;
@@ -453,7 +470,7 @@ TEST(TestStream, CompressInStream) {
     InStream *in_stream = new (std::nothrow) InStream(&inputs, 
                                                       offsets, 
                                                       out_stream->get_stream_length(), 
-                                                      lzo_decompress, 
+                                                      lz4_decompress, 
                                                       out_stream->get_total_buffer_size());
     ASSERT_EQ(in_stream->available(), OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE);
     char data;
@@ -468,6 +485,9 @@ TEST(TestStream, CompressInStream) {
     SAFE_DELETE_ARRAY(write_data);
     SAFE_DELETE(out_stream);
     SAFE_DELETE(in_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 TEST(TestStream, SeekUncompress) {
@@ -488,10 +508,10 @@ TEST(TestStream, SeekUncompress) {
     out_stream->flush();
 
     // read data
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
+    std::vector<StorageByteBuffer*> inputs;
+    std::vector<StorageByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
     ASSERT_NE(it, out_stream->output_buffers().end());
-    ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
+    StorageByteBuffer *tmp_byte_buffer = StorageByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
     inputs.push_back(tmp_byte_buffer);
 
     std::vector<uint64_t> offsets;
@@ -508,9 +528,9 @@ TEST(TestStream, SeekUncompress) {
     index_entry.write_to_buffer(buffer);
     StreamIndexHeader header;
     header.position_format = index_entry.positions_count();
-    header.statistic_format = OLAP_FIELD_TYPE_NONE;
+    header.statistic_format = OLAP_FIELD_TYPE_TINYINT;
     PositionEntryReader entry;
-    entry.init(&header, OLAP_FIELD_TYPE_NONE, false);
+    entry.init(&header, OLAP_FIELD_TYPE_TINYINT, false);
     entry.attach(buffer);
     PositionProvider position(&entry);
 
@@ -524,6 +544,9 @@ TEST(TestStream, SeekUncompress) {
     ASSERT_EQ(data, 0x5b);
     SAFE_DELETE(out_stream);
     SAFE_DELETE(in_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 TEST(TestStream, SkipUncompress) {
@@ -541,10 +564,10 @@ TEST(TestStream, SkipUncompress) {
     out_stream->flush();
 
     // read data
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
+    std::vector<StorageByteBuffer*> inputs;
+    std::vector<StorageByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
     ASSERT_NE(it, out_stream->output_buffers().end());
-    ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
+    StorageByteBuffer *tmp_byte_buffer = StorageByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
     inputs.push_back(tmp_byte_buffer);
 
     std::vector<uint64_t> offsets;
@@ -562,12 +585,15 @@ TEST(TestStream, SkipUncompress) {
     ASSERT_EQ(data, write_data[sizeof(write_data)-1]);
     SAFE_DELETE(out_stream);
     SAFE_DELETE(in_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 TEST(TestStream, SeekCompress) {
     // write data
     OutStream *out_stream = 
-            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lzo_compress);
+            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lz4_compress);
     ASSERT_TRUE(out_stream != NULL);
 
     for (int32_t i = 0; i < 10; i++) {
@@ -583,10 +609,10 @@ TEST(TestStream, SeekCompress) {
     out_stream->flush();
 
     // read data
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
+    std::vector<StorageByteBuffer*> inputs;
+    std::vector<StorageByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
     ASSERT_NE(it, out_stream->output_buffers().end());
-    ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
+    StorageByteBuffer *tmp_byte_buffer = StorageByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
     inputs.push_back(tmp_byte_buffer);
 
     std::vector<uint64_t> offsets;
@@ -595,16 +621,16 @@ TEST(TestStream, SeekCompress) {
             new (std::nothrow) InStream(&inputs, 
                                         offsets, 
                                         out_stream->get_stream_length(), 
-                                        lzo_decompress, 
+                                        lz4_decompress, 
                                         out_stream->get_total_buffer_size());
     //ASSERT_EQ(in_stream->available(), 2);
     char buffer[256];
     index_entry.write_to_buffer(buffer);
     StreamIndexHeader header;
     header.position_format = index_entry.positions_count();
-    header.statistic_format = OLAP_FIELD_TYPE_NONE;
+    header.statistic_format = OLAP_FIELD_TYPE_TINYINT;
     PositionEntryReader entry;
-    entry.init(&header, OLAP_FIELD_TYPE_NONE, false);
+    entry.init(&header, OLAP_FIELD_TYPE_TINYINT, false);
     entry.attach(buffer);
 
     PositionProvider position(&entry);
@@ -614,12 +640,15 @@ TEST(TestStream, SeekCompress) {
     ASSERT_EQ(data, 0x5b);
     SAFE_DELETE(out_stream);
     SAFE_DELETE(in_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 TEST(TestStream, SkipCompress) {
     // write data
     OutStream *out_stream = 
-            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lzo_compress);
+            new(std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, lz4_compress);
     ASSERT_TRUE(out_stream != NULL);
 
     for (int32_t i = 0; i < 10; i++) {
@@ -629,10 +658,10 @@ TEST(TestStream, SkipCompress) {
     out_stream->flush();
 
     // read data
-    std::vector<ByteBuffer*> inputs;
-    std::vector<ByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
+    std::vector<StorageByteBuffer*> inputs;
+    std::vector<StorageByteBuffer*>::const_iterator it = out_stream->output_buffers().begin();
     ASSERT_NE(it, out_stream->output_buffers().end());
-    ByteBuffer *tmp_byte_buffer = ByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
+    StorageByteBuffer *tmp_byte_buffer = StorageByteBuffer::reference_buffer(*it, 0, (*it)->capacity());
     inputs.push_back(tmp_byte_buffer);
 
     std::vector<uint64_t> offsets;
@@ -641,17 +670,19 @@ TEST(TestStream, SkipCompress) {
             new (std::nothrow) InStream(&inputs, 
                                         offsets, 
                                         out_stream->get_stream_length(), 
-                                        lzo_decompress, 
+                                        lz4_decompress, 
                                         out_stream->get_total_buffer_size());
     
     in_stream->skip(10);
     char data;
     ASSERT_EQ(in_stream->read(&data), OLAP_SUCCESS);
     ASSERT_EQ(data, 0x5e);
-
-    
+ 
     SAFE_DELETE(out_stream);
     SAFE_DELETE(in_stream);
+    for (auto input : inputs) {
+        delete input;
+    }
 }
 
 class TestRunLengthByte : public testing::Test {
@@ -663,7 +694,8 @@ public:
     }
     
     virtual void SetUp() {
-        system("rm tmp_file");
+        system("mkdir -p ./ut_dir");
+        system("rm -rf ./ut_dir/tmp_file");
         _out_stream = new (std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, NULL);
         ASSERT_TRUE(_out_stream != NULL);
         _writer = new (std::nothrow) RunLengthByteWriter(_out_stream);
@@ -679,15 +711,15 @@ public:
     }
 
     void CreateReader() {
-        ASSERT_EQ(OLAP_SUCCESS, helper.open_with_mode("tmp_file", 
+        ASSERT_EQ(OLAP_SUCCESS, helper.open_with_mode(_file_path.c_str(), 
                 O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR));
         _out_stream->write_to_file(&helper, 0);
         helper.close();
 
-        ASSERT_EQ(OLAP_SUCCESS, helper.open_with_mode("tmp_file", 
+        ASSERT_EQ(OLAP_SUCCESS, helper.open_with_mode(_file_path.c_str(), 
                 O_RDONLY, S_IRUSR | S_IWUSR)); 
 
-        _shared_buffer = ByteBuffer::create(
+        _shared_buffer = StorageByteBuffer::create(
                 OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE + sizeof(StreamHead));
         ASSERT_TRUE(_shared_buffer != NULL);
 
@@ -697,7 +729,8 @@ public:
                 0, 
                 helper.length(), 
                 NULL, 
-                OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE);
+                OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE,
+                &_stats);
         ASSERT_EQ(OLAP_SUCCESS, _stream->init());
 
         _reader = new (std::nothrow) RunLengthByteReader(_stream);
@@ -708,8 +741,11 @@ public:
     OutStream* _out_stream;
     RunLengthByteWriter* _writer;
     FileHandler helper;
-    ByteBuffer* _shared_buffer;
+    StorageByteBuffer* _shared_buffer;
     ReadOnlyFileStream* _stream;
+    OlapReaderStatistics _stats;
+
+    std::string _file_path = "./ut_dir/tmp_file";
 };
 
 
@@ -803,9 +839,9 @@ TEST_F(TestRunLengthByte, Seek) {
     index_entry.write_to_buffer(buffer);
     StreamIndexHeader header;
     header.position_format = index_entry.positions_count();
-    header.statistic_format = OLAP_FIELD_TYPE_NONE;
+    header.statistic_format = OLAP_FIELD_TYPE_TINYINT;
     PositionEntryReader entry;
-    entry.init(&header, OLAP_FIELD_TYPE_NONE, false);
+    entry.init(&header, OLAP_FIELD_TYPE_TINYINT, false);
     entry.attach(buffer);
 
     PositionProvider position(&entry);
@@ -842,16 +878,15 @@ TEST_F(TestRunLengthByte, Skip) {
 }
 
 }
-}
 
 int main(int argc, char** argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    if (!palo::config::init(conffile.c_str(), false)) {
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
         fprintf(stderr, "error read config file. \n");
         return -1;
     }
-    palo::init_glog("be-test");
-    int ret = palo::OLAP_SUCCESS;
+    doris::init_glog("be-test");
+    int ret = doris::OLAP_SUCCESS;
     testing::InitGoogleTest(&argc, argv);
     ret = RUN_ALL_TESTS();
     google::protobuf::ShutdownProtobufLibrary();

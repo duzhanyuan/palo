@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -25,24 +27,26 @@
 #include "runtime/tuple.h"
 #include "exec/local_file_reader.h"
 #include "runtime/descriptors.h"
+#include "runtime/mem_tracker.h"
 #include "runtime/runtime_state.h"
-#include "runtime/lib_cache.h"
+#include "runtime/user_function_cache.h"
 #include "gen_cpp/Descriptors_types.h"
 #include "gen_cpp/PlanNodes_types.h"
 #include "exprs/cast_functions.h"
 
-namespace palo {
+namespace doris {
 
 class BrokerScannerTest : public testing::Test {
 public:
-    BrokerScannerTest() : _runtime_state("BrokerScannerTest") {
+    BrokerScannerTest() : _tracker(new MemTracker()), _runtime_state(TQueryGlobals()) {
         init();
         _profile = _runtime_state.runtime_profile();
+        _runtime_state._instance_mem_tracker.reset(new MemTracker());
     }
     void init();
 
     static void SetUpTestCase() {
-        LibCache::instance()->init();
+        UserFunctionCache::instance()->init("./be/test/runtime/test_data/user_function_cache/normal");
         CastFunctions::init();
     }
 
@@ -55,6 +59,7 @@ private:
     void init_desc_table();
     void init_params();
 
+    std::shared_ptr<MemTracker> _tracker;
     RuntimeState _runtime_state;
     RuntimeProfile* _profile;
     ObjectPool _obj_pool;
@@ -62,7 +67,7 @@ private:
     TBrokerScanRangeParams _params;
     DescriptorTbl* _desc_tbl;
     std::vector<TNetworkAddress> _addresses;
-    BrokerScanCounter _counter;
+    ScannerCounter _counter;
 };
 
 void BrokerScannerTest::init_desc_table() {
@@ -314,7 +319,7 @@ void BrokerScannerTest::init_params() {
         cast_expr.fn.has_var_args = false;
         cast_expr.fn.__set_signature("casttoint(VARCHAR(*))");
         cast_expr.fn.__isset.scalar_fn = true;
-        cast_expr.fn.scalar_fn.symbol = "palo::CastFunctions::cast_to_int_val";
+        cast_expr.fn.scalar_fn.symbol = "doris::CastFunctions::cast_to_int_val";
 
         TExprNode slot_ref;
         slot_ref.node_type = TExprNodeType::SLOT_REF;
@@ -356,7 +361,7 @@ TEST_F(BrokerScannerTest, normal) {
     auto st = scanner.open();
     ASSERT_TRUE(st.ok());
 
-    MemPool tuple_pool(_runtime_state.instance_mem_tracker());
+    MemPool tuple_pool(_tracker.get());
     Tuple* tuple = (Tuple*)tuple_pool.allocate(20);
     bool eof = false;
     // 1,2,3
@@ -408,7 +413,7 @@ TEST_F(BrokerScannerTest, normal2) {
     auto st = scanner.open();
     ASSERT_TRUE(st.ok());
 
-    MemPool tuple_pool(_runtime_state.instance_mem_tracker());
+    MemPool tuple_pool(_tracker.get());
     Tuple* tuple = (Tuple*)tuple_pool.allocate(20);
     bool eof = false;
     // 1,2,3
@@ -454,7 +459,7 @@ TEST_F(BrokerScannerTest, normal3) {
     auto st = scanner.open();
     ASSERT_TRUE(st.ok());
 
-    MemPool tuple_pool(_runtime_state.instance_mem_tracker());
+    MemPool tuple_pool(_tracker.get());
     Tuple* tuple = (Tuple*)tuple_pool.allocate(20);
     bool eof = false;
     // 1,2,3
@@ -501,7 +506,7 @@ TEST_F(BrokerScannerTest, normal4) {
     auto st = scanner.open();
     ASSERT_TRUE(st.ok());
 
-    MemPool tuple_pool(_runtime_state.instance_mem_tracker());
+    MemPool tuple_pool(_tracker.get());
     Tuple* tuple = (Tuple*)tuple_pool.allocate(20);
     bool eof = false;
     // 1,2,3
@@ -532,7 +537,7 @@ TEST_F(BrokerScannerTest, normal5) {
     auto st = scanner.open();
     ASSERT_TRUE(st.ok());
 
-    MemPool tuple_pool(_runtime_state.instance_mem_tracker());
+    MemPool tuple_pool(_tracker.get());
     Tuple* tuple = (Tuple*)tuple_pool.allocate(20);
     bool eof = false;
     // end of file
@@ -556,7 +561,7 @@ TEST_F(BrokerScannerTest, normal6) {
     auto st = scanner.open();
     ASSERT_TRUE(st.ok());
 
-    MemPool tuple_pool(_runtime_state.instance_mem_tracker());
+    MemPool tuple_pool(_tracker.get());
     Tuple* tuple = (Tuple*)tuple_pool.allocate(20);
     bool eof = false;
     // 4,5,6
@@ -587,7 +592,7 @@ TEST_F(BrokerScannerTest, normal7) {
     auto st = scanner.open();
     ASSERT_TRUE(st.ok());
 
-    MemPool tuple_pool(_runtime_state.instance_mem_tracker());
+    MemPool tuple_pool(_tracker.get());
     Tuple* tuple = (Tuple*)tuple_pool.allocate(20);
     bool eof = false;
     // end of file
@@ -611,7 +616,7 @@ TEST_F(BrokerScannerTest, normal8) {
     auto st = scanner.open();
     ASSERT_TRUE(st.ok());
 
-    MemPool tuple_pool(_runtime_state.instance_mem_tracker());
+    MemPool tuple_pool(_tracker.get());
     Tuple* tuple = (Tuple*)tuple_pool.allocate(20);
     bool eof = false;
     // 4,5,6
@@ -642,7 +647,7 @@ TEST_F(BrokerScannerTest, normal9) {
     auto st = scanner.open();
     ASSERT_TRUE(st.ok());
 
-    MemPool tuple_pool(_runtime_state.instance_mem_tracker());
+    MemPool tuple_pool(_tracker.get());
     Tuple* tuple = (Tuple*)tuple_pool.allocate(20);
     bool eof = false;
     // end of file
@@ -651,15 +656,15 @@ TEST_F(BrokerScannerTest, normal9) {
     ASSERT_TRUE(eof);
 }
 
-} // end namespace palo
+} // end namespace doris
 
 int main(int argc, char** argv) {
-    // std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    // if (!palo::config::init(conffile.c_str(), false)) {
+    // std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    // if (!doris::config::init(conffile.c_str(), false)) {
     //     fprintf(stderr, "error read config file. \n");
     //     return -1;
     // }
-    // palo::init_glog("be-test");
+    // doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

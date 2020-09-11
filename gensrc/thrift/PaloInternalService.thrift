@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-namespace cpp palo
-namespace java com.baidu.palo.thrift
+namespace cpp doris
+namespace java org.apache.doris.thrift
 
 include "Status.thrift"
 include "Types.thrift"
@@ -45,11 +42,18 @@ const i64 DEFAULT_PARTITION_ID = -1;
 enum TQueryType {
     SELECT,
     LOAD,
+    EXTERNAL
 }
 
 enum TErrorHubType {
     MYSQL,
-    NULL_TYPE 
+    BROKER,
+    NULL_TYPE
+}
+
+enum TPrefetchMode {
+    NONE,
+    HT_BUCKET
 }
 
 struct TMysqlErrorHubInfo {
@@ -61,9 +65,16 @@ struct TMysqlErrorHubInfo {
     6: required string table;
 }
 
+struct TBrokerErrorHubInfo {
+    1: required Types.TNetworkAddress broker_addr;
+    2: required string path;
+    3: required map<string, string> prop;
+}
+
 struct TLoadErrorHubInfo {
     1: required TErrorHubType type = TErrorHubType.NULL_TYPE;
     2: optional TMysqlErrorHubInfo mysql_info;
+    3: optional TBrokerErrorHubInfo broker_info;
 }
 
 // Query options that correspond to PaloService.PaloQueryOptions,
@@ -86,9 +97,49 @@ struct TQueryOptions {
   15: optional bool is_report_success = 0
   16: optional i32 codegen_level = 0
   // INT64::MAX
-  17: optional i64 kudu_latest_observed_ts = 9223372036854775807
+  17: optional i64 kudu_latest_observed_ts = 9223372036854775807 // Deprecated
   18: optional TQueryType query_type = TQueryType.SELECT
+  19: optional i64 min_reservation = 0
+  20: optional i64 max_reservation = 107374182400
+  21: optional i64 initial_reservation_total_claims = 2147483647 // TODO chenhao
+  22: optional i64 buffer_pool_limit = 2147483648
+
+  // The default spillable buffer size in bytes, which may be overridden by the planner.
+  // Defaults to 2MB.
+  23: optional i64 default_spillable_buffer_size = 2097152;
+
+  // The minimum spillable buffer to use. The planner will not choose a size smaller than
+  // this. Defaults to 64KB.
+  24: optional i64 min_spillable_buffer_size = 65536;
+
+  // The maximum size of row that the query will reserve memory to process. Processing
+  // rows larger than this may result in a query failure. Defaults to 512KB, e.g.
+  // enough for a row with 15 32KB strings or many smaller columns.
+  //
+  // Different operators handle this option in different ways. E.g. some simply increase
+  // the size of all their buffers to fit this row size, whereas others may use more
+  // sophisticated strategies - e.g. reserving a small number of buffers large enough to
+  // fit maximum-sized rows.
+  25: optional i64 max_row_size = 524288;
+
+  // stream preaggregation
+  26: optional bool disable_stream_preaggregations = false;
+
+  // multithreaded degree of intra-node parallelism
+  27: optional i32 mt_dop = 0;
+  // if this is a query option for LOAD, load_mem_limit should be set to limit the mem comsuption
+  // of load channel.
+  28: optional i64 load_mem_limit = 0;
+  // see BE config `doris_max_scan_key_num` for details
+  // if set, this will overwrite the BE config.
+  29: optional i32 max_scan_key_num;
+  // see BE config `max_pushdown_conditions_per_column` for details
+  // if set, this will overwrite the BE config.
+  30: optional i32 max_pushdown_conditions_per_column
+  // whether enable spilling to disk
+  31: optional bool enable_spilling = false;
 }
+    
 
 // A scan range plus the parameters needed to execute that scan.
 struct TScanRangeParams {
@@ -103,6 +154,7 @@ struct TPlanFragmentDestination {
 
   // ... which is being executed on this server
   2: required Types.TNetworkAddress server
+  3: optional Types.TNetworkAddress brpc_server
 }
 
 // Parameters for a single execution instance of a particular TPlanFragment
@@ -110,7 +162,7 @@ struct TPlanFragmentDestination {
 struct TPlanFragmentExecParams {
   // a globally unique id assigned to the entire query
   1: required Types.TUniqueId query_id
-  
+
   // a globally unique id assigned to this particular execution instance of
   // a TPlanFragment
   2: required Types.TUniqueId fragment_instance_id
@@ -135,12 +187,23 @@ struct TPlanFragmentExecParams {
 
   // Id of this fragment in its role as a sender.
   9: optional i32 sender_id
+  10: optional i32 num_senders
+  11: optional bool send_query_statistics_with_every_batch
 }
 
 // Global query parameters assigned by the coordinator.
 struct TQueryGlobals {
   // String containing a timestamp set as the current time.
+  // Format is yyyy-MM-dd HH:mm:ss
   1: required string now_string
+
+  // To support timezone in Doris. timestamp_ms is the millisecond uinix timestamp for
+  // this query to calculate time zone relative function 
+  2: optional i64 timestamp_ms
+
+  // time_zone is the timezone this query used.
+  // If this value is set, BE will ignore now_string
+  3: optional string time_zone
 }
 
 
@@ -177,7 +240,7 @@ struct TExecPlanFragmentParams {
   // Global query parameters assigned by coordinator.
   // required in V1
   7: optional TQueryGlobals query_globals
-  
+
   // options for the query
   // required in V1
   8: optional TQueryOptions query_options
@@ -216,7 +279,6 @@ struct TCancelPlanFragmentResult {
 
 
 // TransmitData
-
 struct TTransmitDataParams {
   1: required PaloInternalServiceVersion protocol_version
 
@@ -251,6 +313,64 @@ struct TTransmitDataResult {
   4: optional Types.TPlanNodeId dest_node_id
 }
 
+struct TTabletWithPartition {
+    1: required i64 partition_id
+    2: required i64 tablet_id
+}
+
+// open a tablet writer
+struct TTabletWriterOpenParams {
+    1: required Types.TUniqueId id
+    2: required i64 index_id
+    3: required i64 txn_id
+    4: required Descriptors.TOlapTableSchemaParam schema
+    5: required list<TTabletWithPartition> tablets
+
+    6: required i32 num_senders
+}
+
+struct TTabletWriterOpenResult {
+    1: required Status.TStatus status
+}
+
+// add batch to tablet writer
+struct TTabletWriterAddBatchParams {
+    1: required Types.TUniqueId id
+    2: required i64 index_id
+
+    3: required i64 packet_seq
+    4: required list<Types.TTabletId> tablet_ids
+    5: required Data.TRowBatch row_batch
+
+    6: required i32 sender_no
+}
+
+struct TTabletWriterAddBatchResult {
+    1: required Status.TStatus status
+}
+
+struct TTabletWriterCloseParams {
+    1: required Types.TUniqueId id
+    2: required i64 index_id
+
+    3: required i32 sender_no
+}
+
+struct TTabletWriterCloseResult {
+    1: required Status.TStatus status
+}
+
+//
+struct TTabletWriterCancelParams {
+    1: required Types.TUniqueId id
+    2: required i64 index_id
+
+    3: required i32 sender_no
+}
+
+struct TTabletWriterCancelResult {
+}
+
 struct TFetchDataParams {
   1: required PaloInternalServiceVersion protocol_version
   // required in V1
@@ -259,7 +379,7 @@ struct TFetchDataParams {
 }
 
 struct TFetchDataResult {
-    // result batch 
+    // result batch
     1: required Data.TResultBatch result_batch
     // end of stream flag
     2: required bool eos
@@ -269,45 +389,10 @@ struct TFetchDataResult {
     4: optional Status.TStatus status
 }
 
-struct TFetchStartKey {
-    1: required list<string> key
-}
-
-struct TFetchEndKey {
-    1: required list<string> key
-}
-
 struct TCondition {
     1:  required string column_name
     2:  required string condition_op
     3:  required list<string> condition_values
-}
-
-struct TFetchRequest {
-    1: required bool use_compression
-    2: optional i32 num_rows
-    3: required i32 schema_hash
-    4: required Types.TTabletId tablet_id
-    5: required i32 version
-    6: required i64 version_hash
-    7: required list<string> field
-    8: optional string user
-    9: optional string output
-    10: optional string range
-    11: required list<TFetchStartKey> start_key
-	12: required list<TFetchEndKey> end_key
-    13: required list<TCondition> where
-    14: optional string end_range
-    15: optional bool aggregation
-}
-
-struct TShowHintsRequest {
-    1: required Types.TTabletId tablet_id
-    2: required i32 schema_hash
-    3: required i32 block_row_count
-    4: optional string end_range = "lt"
-    5: required list<TFetchStartKey> start_key
-	6: required list<TFetchEndKey> end_key
 }
 
 struct TExportStatusResult {
@@ -315,4 +400,3 @@ struct TExportStatusResult {
     2: required Types.TExportState state
     3: optional list<string> files
 }
-

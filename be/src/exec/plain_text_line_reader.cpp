@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -33,7 +30,7 @@
 // #define OUTPUT_CHUNK (32)
 // leave these 2 size small for debuging
 
-namespace palo {
+namespace doris {
 
 PlainTextLineReader::PlainTextLineReader(
         RuntimeProfile* profile,
@@ -56,7 +53,7 @@ PlainTextLineReader::PlainTextLineReader(
             _output_buf_limit(0),
             _file_eof(false),
             _eof(false),
-            _stream_end(false),
+            _stream_end(true),
             _more_input_bytes(0),
             _more_output_bytes(0),
             _bytes_read_counter(nullptr),
@@ -189,7 +186,7 @@ Status PlainTextLineReader::read_line(const uint8_t** ptr, size_t* size, bool* e
     if (_eof || update_eof()) {
         *size = 0;
         *eof = true;
-        return Status::OK;
+        return Status::OK();
     }
     int found_line_delimiter = 0;
     size_t offset = 0;
@@ -246,13 +243,12 @@ Status PlainTextLineReader::read_line(const uint8_t** ptr, size_t* size, bool* e
                     if (!_stream_end) {
                         std::stringstream ss;
                         ss << "Compressed file has been truncated, which is not allowed";
-                        return Status(ss.str());
+                        return Status::InternalError(ss.str());
                     } else {
                         // last loop we meet stream end,
                         // and now we finished reading file, so we are finished
-                        *size = 0;
-                        *eof = true;
-                        return Status::OK;
+                        // break this loop to see if there is data in buffer
+                        break;
                     }
                 }
 
@@ -314,11 +310,11 @@ Status PlainTextLineReader::read_line(const uint8_t** ptr, size_t* size, bool* e
 
                     // (cmy), for now, return failed to avoid potential endless loop
                     std::stringstream ss;
-                    ss << "decompress made no progess."
+                    ss << "decompress made no progress."
                        << " input_read_bytes: " << input_read_bytes
                        << " decompressed_len: " << decompressed_len;
                     LOG(WARNING) << ss.str();
-                    return Status(ss.str());
+                    return Status::InternalError(ss.str());
                 }
 
                 if (_more_input_bytes > 0) {
@@ -348,7 +344,7 @@ Status PlainTextLineReader::read_line(const uint8_t** ptr, size_t* size, bool* e
     // update total read bytes
     _total_read_bytes += *size + found_line_delimiter;
 
-    return Status::OK;
+    return Status::OK();
 }
 
 } // end of namespace

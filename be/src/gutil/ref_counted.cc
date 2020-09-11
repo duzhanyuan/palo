@@ -5,9 +5,9 @@
 #include "gutil/ref_counted.h"
 
 #include <common/logging.h>
-#include "gutil/threading/thread_collision_warner.h"
+#include "gutil/atomic_refcount.h"
 
-namespace kudu {
+namespace doris {
 
 namespace subtle {
 
@@ -92,4 +92,4 @@ bool RefCountedThreadSafeBase::Release() const {
 
 }  // namespace subtle
 
-}  // namespace kudu
+}  // namespace doris

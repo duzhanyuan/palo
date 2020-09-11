@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -22,16 +19,18 @@
 
 #include <iomanip>
 #include <sstream>
-#include <math.h>
+#include <cmath>
+#include <stdlib.h>
 
 #include "common/compiler_util.h"
 #include "exprs/anyval_util.h"
 #include "exprs/expr.h"
 #include "runtime/tuple_row.h"
 #include "runtime/decimal_value.h"
+#include "runtime/decimalv2_value.h"
 #include "util/string_parser.hpp"
 
-namespace palo {
+namespace doris {
 
 const char* MathFunctions::_s_alphanumeric_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
@@ -71,7 +70,7 @@ const double log_10[] = {
 
 #define ARRAY_ELEMENTS(A) ((uint64_t) (sizeof(A)/sizeof(A[0])))
 
-static double my_double_round(double value, int64_t dec, bool dec_unsigned, bool truncate) {
+double MathFunctions::my_double_round(double value, int64_t dec, bool dec_unsigned, bool truncate) {
     bool dec_negative = (dec < 0) && !dec_unsigned;
     uint64_t abs_dec = dec_negative ? -dec : dec;
     /*
@@ -116,6 +115,66 @@ DoubleVal MathFunctions::e(FunctionContext* ctx) {
     return DoubleVal(M_E);
 }
 
+DecimalVal MathFunctions::abs(FunctionContext* ctx, const doris_udf::DecimalVal& val) {
+    if (val.is_null) {
+        return DecimalVal::null();
+    } else if (val.sign) {
+        return negative_decimal(ctx, val);
+    } else {
+        return positive_decimal(ctx, val);
+    }
+}
+
+DecimalV2Val MathFunctions::abs(FunctionContext* ctx, const doris_udf::DecimalV2Val& val) {
+    if (val.is_null) {
+        return DecimalV2Val::null();
+    }
+    if (UNLIKELY(val.val == MIN_INT128)) {
+        return DecimalV2Val::null();
+    } else {
+        return DecimalV2Val(::abs(val.val));
+    }
+}
+
+LargeIntVal MathFunctions::abs(FunctionContext* ctx, const doris_udf::LargeIntVal& val) {
+    if (val.is_null) {
+        return LargeIntVal::null();
+    }
+    if (UNLIKELY(val.val == MIN_INT128)) {
+        return LargeIntVal::null();
+    } else {
+        return LargeIntVal(::abs(val.val));
+    }
+}
+
+LargeIntVal MathFunctions::abs(FunctionContext* ctx, const doris_udf::BigIntVal& val) {
+    if (val.is_null) {
+        return LargeIntVal::null();
+    }
+    return LargeIntVal(::abs(__int128(val.val)));
+}
+
+BigIntVal MathFunctions::abs(FunctionContext* ctx, const doris_udf::IntVal& val) {
+    if (val.is_null) {
+        return BigIntVal::null();
+    }
+    return BigIntVal(::abs(int64_t(val.val)));
+}
+
+IntVal MathFunctions::abs(FunctionContext* ctx, const doris_udf::SmallIntVal& val) {
+    if (val.is_null) {
+        return IntVal::null();
+    }
+    return IntVal(::abs(int32_t(val.val)));
+}
+
+SmallIntVal MathFunctions::abs(FunctionContext* ctx, const doris_udf::TinyIntVal& val) {
+    if (val.is_null) {
+        return SmallIntVal::null();
+    }
+    return SmallIntVal(::abs(int16_t(val.val)));
+}
+
 // Generates a UDF that always calls FN() on the input val and returns it.
 #define ONE_ARG_MATH_FN(NAME, RET_TYPE, INPUT_TYPE, FN) \
     RET_TYPE MathFunctions::NAME(FunctionContext* ctx, const INPUT_TYPE& v) { \
@@ -124,6 +183,7 @@ DoubleVal MathFunctions::e(FunctionContext* ctx) {
     }
 
 ONE_ARG_MATH_FN(abs, DoubleVal, DoubleVal, std::fabs);
+ONE_ARG_MATH_FN(abs, FloatVal, FloatVal, std::fabs);
 ONE_ARG_MATH_FN(sin, DoubleVal, DoubleVal, std::sin);
 ONE_ARG_MATH_FN(asin, DoubleVal, DoubleVal, std::asin);
 ONE_ARG_MATH_FN(cos, DoubleVal, DoubleVal, std::cos);
@@ -533,6 +593,11 @@ DecimalVal MathFunctions::positive_decimal(
     return val;
 }
 
+DecimalV2Val MathFunctions::positive_decimal(
+        FunctionContext* ctx, const DecimalV2Val& val) {
+    return val;
+}
+
 BigIntVal MathFunctions::negative_bigint(
         FunctionContext* ctx, const BigIntVal& val) {
     if (val.is_null) {
@@ -562,6 +627,17 @@ DecimalVal MathFunctions::negative_decimal(
     return result;
 }
 
+DecimalV2Val MathFunctions::negative_decimal(
+        FunctionContext* ctx, const DecimalV2Val& val) {
+    if (val.is_null) {
+        return val;
+    }
+    const DecimalV2Value& dv1 = DecimalV2Value::from_decimal_val(val);
+    DecimalV2Val result;
+    (-dv1).to_decimal_val(&result);
+    return result;
+}
+
 #define LEAST_FN(TYPE) \
     TYPE MathFunctions::least(\
             FunctionContext* ctx, int num_args, const TYPE* args) { \
@@ -585,14 +661,14 @@ DecimalVal MathFunctions::negative_decimal(
 
 LEAST_FNS();
 
-#define LEAST_NONNUMERIC_FN(TYPE_NAME, TYPE, PALO_TYPE) \
+#define LEAST_NONNUMERIC_FN(TYPE_NAME, TYPE, DORIS_TYPE) \
     TYPE MathFunctions::least(\
             FunctionContext* ctx, int num_args, const TYPE* args) { \
         if (args[0].is_null) return TYPE::null(); \
-        PALO_TYPE result_val = PALO_TYPE::from_##TYPE_NAME(args[0]); \
+        DORIS_TYPE result_val = DORIS_TYPE::from_##TYPE_NAME(args[0]); \
         for (int i = 1; i < num_args; ++i) { \
             if (args[i].is_null) return TYPE::null(); \
-            PALO_TYPE val = PALO_TYPE::from_##TYPE_NAME(args[i]); \
+            DORIS_TYPE val = DORIS_TYPE::from_##TYPE_NAME(args[i]); \
             if (val < result_val) result_val = val; \
         } \
         TYPE result; \
@@ -604,6 +680,7 @@ LEAST_FNS();
     LEAST_NONNUMERIC_FN(string_val, StringVal, StringValue); \
     LEAST_NONNUMERIC_FN(datetime_val, DateTimeVal, DateTimeValue); \
     LEAST_NONNUMERIC_FN(decimal_val, DecimalVal, DecimalValue); \
+    LEAST_NONNUMERIC_FN(decimal_val, DecimalV2Val, DecimalV2Value); \
 
 LEAST_NONNUMERIC_FNS();
 
@@ -630,14 +707,14 @@ LEAST_NONNUMERIC_FNS();
 
 GREATEST_FNS();
 
-#define GREATEST_NONNUMERIC_FN(TYPE_NAME, TYPE, PALO_TYPE) \
+#define GREATEST_NONNUMERIC_FN(TYPE_NAME, TYPE, DORIS_TYPE) \
     TYPE MathFunctions::greatest(\
             FunctionContext* ctx, int num_args, const TYPE* args) { \
         if (args[0].is_null) return TYPE::null(); \
-        PALO_TYPE result_val = PALO_TYPE::from_##TYPE_NAME(args[0]); \
+        DORIS_TYPE result_val = DORIS_TYPE::from_##TYPE_NAME(args[0]); \
         for (int i = 1; i < num_args; ++i) { \
             if (args[i].is_null) return TYPE::null(); \
-            PALO_TYPE val = PALO_TYPE::from_##TYPE_NAME(args[i]); \
+            DORIS_TYPE val = DORIS_TYPE::from_##TYPE_NAME(args[i]); \
             if (val > result_val) result_val = val; \
         } \
         TYPE result; \
@@ -649,6 +726,7 @@ GREATEST_FNS();
     GREATEST_NONNUMERIC_FN(string_val, StringVal, StringValue); \
     GREATEST_NONNUMERIC_FN(datetime_val, DateTimeVal, DateTimeValue); \
     GREATEST_NONNUMERIC_FN(decimal_val, DecimalVal, DecimalValue); \
+    GREATEST_NONNUMERIC_FN(decimal_val, DecimalV2Val, DecimalV2Value); \
 
 GREATEST_NONNUMERIC_FNS();
 
@@ -794,6 +872,24 @@ void* MathFunctions::least_decimal(Expr* e, TupleRow* row) {
     }
     return &e->children()[result_idx]->_result.decimal_val;
 }
+
+void* MathFunctions::least_decimalv2(Expr* e, TupleRow* row) {
+    DCHECK_GE(e->get_num_children(), 1);
+    int32_t num_args = e->get_num_children();
+    int result_idx = 0;
+    // NOTE: loop index starts at 0, so If frist arg is NULL, we can return early..
+    for (int i = 0; i < num_args; ++i) {
+        DecimalV2Value* arg = reinterpret_cast<DecimalV2Value*>(e->children()[i]->get_value(row));
+        if (arg == NULL) {
+            return NULL;
+        }
+        if (*arg < *reinterpret_cast<DecimalV2Value*>(e->children()[result_idx]->get_value(row))) {
+            result_idx = i;
+        }
+    }
+    return &e->children()[result_idx]->_result.decimalv2_val;
+}
+
 
 void* MathFunctions::least_string(Expr* e, TupleRow* row) {
     DCHECK_GE(e->get_num_children(), 1);

@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -20,9 +22,10 @@
 #include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
 
+#include "common/configbase.h"
 #include "util/logging.h"
 
-namespace palo {
+namespace doris {
 
 namespace filesystem = boost::filesystem;
 using filesystem::path;
@@ -41,8 +44,13 @@ TEST(FileSystemUtil, CreateDirectory) {
     // Test error cases by removing write permissions on root dir to prevent
     // creation/deletion of subdirs
     chmod(dir.string().c_str(), 0);
-    EXPECT_FALSE(FileSystemUtil::create_directory(subdir1.string()).ok());
-    EXPECT_FALSE(FileSystemUtil::create_directory(subdir2.string()).ok());
+    if (getuid() == 0) {// User root
+        EXPECT_TRUE(FileSystemUtil::create_directory(subdir1.string()).ok());
+        EXPECT_TRUE(FileSystemUtil::create_directory(subdir2.string()).ok());
+    } else {// User other
+        EXPECT_FALSE(FileSystemUtil::create_directory(subdir1.string()).ok());
+        EXPECT_FALSE(FileSystemUtil::create_directory(subdir2.string()).ok());
+    }
     // Test success cases by adding write permissions back
     chmod(dir.string().c_str(), S_IRWXU);
     EXPECT_TRUE(FileSystemUtil::create_directory(subdir1.string()).ok());
@@ -118,15 +126,15 @@ TEST(FilesystemUtil, contain_path) {
     }
 }
 
-} // end namespace palo
+} // end namespace doris
 
 int main(int argc, char** argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    if (!palo::config::init(conffile.c_str(), false)) {
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
         fprintf(stderr, "error read config file. \n");
         return -1;
     }
-    palo::init_glog("be-test");
+    doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

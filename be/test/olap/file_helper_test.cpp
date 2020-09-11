@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -21,6 +23,7 @@
 #include "olap/olap_define.h"
 #include "olap/file_helper.h"
 #include "boost/filesystem.hpp"
+#include "common/configbase.h"
 #include "util/logging.h"
 
 #ifndef BE_TEST
@@ -32,19 +35,19 @@ using ::testing::Return;
 using ::testing::SetArgPointee;
 using std::string;
 
-namespace palo {
+namespace doris {
 
 class FileHandlerTest : public testing::Test {
 public:
     // create a mock cgroup folder 
-    static void SetUpTestCase() {
+    virtual void SetUp() {
         ASSERT_FALSE(boost::filesystem::exists(_s_test_data_path));
         // create a mock cgroup path
         ASSERT_TRUE(boost::filesystem::create_directory(_s_test_data_path));
     }
 
     // delete the mock cgroup folder
-    static void TearDownTestCase() {
+    virtual void TearDown() {
         ASSERT_TRUE(boost::filesystem::remove_all(_s_test_data_path));
     }
     
@@ -52,7 +55,7 @@ public:
     static std::string _s_test_data_path;
 };
 
-std::string FileHandlerTest::_s_test_data_path = "./file_handler_testxxxx123";
+std::string FileHandlerTest::_s_test_data_path = "./log/file_handler_testxxxx123";
 
 TEST_F(FileHandlerTest, TestWrite) {
     FileHandler file_handler;
@@ -89,19 +92,24 @@ TEST_F(FileHandlerTest, TestWrite) {
     ASSERT_EQ(22, length);
 
     
-    char* large_bytes2[(1 << 12)];
+    char* large_bytes2[(1 << 10)];
     memset(large_bytes2, 0, sizeof(char)*((1 << 12)));
     int i = 1;
-    while (i < 1 << 20) {
+    while (i < 1 << 17) {
         file_handler.write(large_bytes2, ((1 << 12)));
         ++i;
     }
 }
 
-}  // namespace palo
+}  // namespace doris
 
 int main(int argc, char **argv) {
-    palo::init_glog("be-test");
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
+        fprintf(stderr, "error read config file. \n");
+        return -1;
+    }
+    doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

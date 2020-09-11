@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -44,7 +46,7 @@ using boost::scoped_ptr;
 static const int BATCH_SIZE = 250;
 static const uint32_t PRIME = 479001599;
 
-namespace palo {
+namespace doris {
 
 static const StringValue STRINGS[] = {
     StringValue("ABC"),
@@ -62,14 +64,14 @@ static const int NUM_STRINGS = sizeof(STRINGS) / sizeof(StringValue);
 
 class SimpleTupleStreamTest : public testing::Test {
 public:
-    SimpleTupleStreamTest() : _tracker(-1) {}
+    SimpleTupleStreamTest() : _tracker(new MemTracker(-1)) {}
      // A null dtor to pass codestyle check
     ~SimpleTupleStreamTest() {}
 protected:
     virtual void SetUp() {
         _test_env.reset(new TestEnv());
         create_descriptors();
-        _mem_pool.reset(new MemPool(&_tracker));
+        _mem_pool.reset(new MemPool(_tracker.get()));
     }
 
     virtual void create_descriptors() {
@@ -100,7 +102,7 @@ protected:
     void InitBlockMgr(int64_t limit, int block_size) {
         Status status = _test_env->create_query_state(0, limit, block_size, &_runtime_state);
         ASSERT_TRUE(status.ok());
-        status = _runtime_state->block_mgr2()->register_client(0, &_tracker, _runtime_state,
+        status = _runtime_state->block_mgr2()->register_client(0, _tracker, _runtime_state,
                 &_client);
         ASSERT_TRUE(status.ok());
     }
@@ -118,7 +120,7 @@ protected:
     }
 
     virtual RowBatch* CreateIntBatch(int offset, int num_rows, bool gen_null) {
-        RowBatch* batch = _pool.add(new RowBatch(*_int_desc, num_rows, &_tracker));
+        RowBatch* batch = _pool.add(new RowBatch(*_int_desc, num_rows, _tracker.get()));
         int tuple_size = _int_desc->tuple_descriptors()[0]->byte_size();
         uint8_t* tuple_mem = reinterpret_cast<uint8_t*>(
                 batch->tuple_data_pool()->allocate(tuple_size * num_rows));
@@ -147,7 +149,7 @@ protected:
 
     virtual RowBatch* CreateStringBatch(int offset, int num_rows, bool gen_null) {
         int tuple_size = sizeof(StringValue) + 1;
-        RowBatch* batch = _pool.add(new RowBatch(*_string_desc, num_rows, &_tracker));
+        RowBatch* batch = _pool.add(new RowBatch(*_string_desc, num_rows, _tracker.get()));
         uint8_t* tuple_mem = batch->tuple_data_pool()->allocate(tuple_size * num_rows);
         memset(tuple_mem, 0, tuple_size * num_rows);
         const int string_tuples = _string_desc->tuple_descriptors().size();
@@ -210,7 +212,7 @@ protected:
     void ReadValues(BufferedTupleStream2* stream, RowDescriptor* desc, vector<T>* results,
             int num_batches = -1) {
         bool eos = false;
-        RowBatch batch(*desc, BATCH_SIZE, &_tracker);
+        RowBatch batch(*desc, BATCH_SIZE, _tracker.get());
         int batches_read = 0;
         do {
             batch.reset();
@@ -355,7 +357,7 @@ protected:
     RuntimeState* _runtime_state;
     BufferedBlockMgr2::Client* _client;
 
-    MemTracker _tracker;
+    std::shared_ptr<MemTracker> _tracker;
     ObjectPool _pool;
     RowDescriptor* _int_desc;
     RowDescriptor* _string_desc;
@@ -789,7 +791,7 @@ TEST_F(ArrayTupleStreamTest, TestArrayDeepCopy) {
     array_len_index = 0;
     bool eos = false;
     int rows_read = 0;
-    RowBatch batch(*_array_desc, BATCH_SIZE, &_tracker);
+    RowBatch batch(*_array_desc, BATCH_SIZE, _tracker.get());
     do {
         batch.reset();
         ASSERT_TRUE(stream.get_next(&batch, &eos).ok());
@@ -829,23 +831,23 @@ TEST_F(ArrayTupleStreamTest, TestArrayDeepCopy) {
 }
 
 int main(int argc, char** argv) {
-    // std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    // if (!palo::config::init(conffile.c_str(), false)) {
+    // std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    // if (!doris::config::init(conffile.c_str(), false)) {
     //     fprintf(stderr, "error read config file. \n");
     //     return -1;
     // }
-    palo::config::query_scratch_dirs = "/tmp";
-    // palo::config::max_free_io_buffers = 128;
-    palo::config::read_size = 8388608;
-    palo::config::min_buffer_size = 1024;
+    doris::config::query_scratch_dirs = "/tmp";
+    // doris::config::max_free_io_buffers = 128;
+    doris::config::read_size = 8388608;
+    doris::config::min_buffer_size = 1024;
 
-    palo::config::disable_mem_pools = false;
+    doris::config::disable_mem_pools = false;
 
-    palo::init_glog("be-test");
+    doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
 
-    palo::CpuInfo::init();
-    palo::DiskInfo::init();
+    doris::CpuInfo::init();
+    doris::DiskInfo::init();
 
     return RUN_ALL_TESTS();
 }

@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,14 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXPRS_DECIMAL_OPERATORS_H
-#define BDG_PALO_BE_SRC_QUERY_EXPRS_DECIMAL_OPERATORS_H
+#ifndef DORIS_BE_SRC_QUERY_EXPRS_DECIMAL_OPERATORS_H
+#define DORIS_BE_SRC_QUERY_EXPRS_DECIMAL_OPERATORS_H
 
 #include <stdint.h>
 #include "runtime/decimal_value.h"
 #include "udf/udf.h"
 
-namespace palo {
+namespace doris {
 
 class Expr;
 struct ExprValue;
@@ -44,6 +41,7 @@ public:
     static DecimalVal cast_to_decimal_val(FunctionContext*, const LargeIntVal&);
     static DecimalVal cast_to_decimal_val(FunctionContext*, const FloatVal&);
     static DecimalVal cast_to_decimal_val(FunctionContext*, const DoubleVal&);
+    static DecimalVal cast_to_decimal_val(FunctionContext*, const DateTimeVal&);
     static DecimalVal cast_to_decimal_val(FunctionContext*, const StringVal&);
 
     static BooleanVal cast_to_boolean_val(FunctionContext*, const DecimalVal&);

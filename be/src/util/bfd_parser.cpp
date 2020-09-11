@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -24,7 +21,7 @@
 
 #include "common/logging.h"
 
-namespace palo {
+namespace doris {
 
 struct BfdFindCtx {
     BfdFindCtx(bfd_symbol** syms_, bfd_vma pc_)
@@ -48,14 +45,28 @@ static void find_addr_in_section(bfd* abfd, asection* sec, void* arg) {
     if (ctx->found) {
         return;
     }
+#ifdef bfd_get_section_flags
     if ((bfd_get_section_flags(abfd, sec) & SEC_ALLOC) == 0) {
         return;
     }
+#else
+    if ((bfd_section_flags(sec) & SEC_ALLOC) == 0) {
+        return;
+    }
+#endif
+#ifdef bfd_get_section_vma
     auto vma = bfd_get_section_vma(abfd, sec);
+#else
+    auto vma = bfd_section_vma(sec);
+#endif
     if (ctx->pc < vma) {
         return;
     }
+#ifdef bfd_get_section_size
     auto size = bfd_get_section_size(sec);
+#else
+    auto size = bfd_section_size(sec);
+#endif
     if (ctx->pc >= vma + size) {
         return;
     }

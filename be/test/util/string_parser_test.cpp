@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -25,7 +27,7 @@
 
 #include "util/logging.h"
 
-namespace palo {
+namespace doris {
 
 std::string space[] = {"", "   ", "\t\t\t", "\n\n\n", "\v\v\v", "\f\f\f", "\r\r\r"};
 const int space_len = 7;
@@ -39,6 +41,21 @@ void test_int_value(const char* s, T exp_val, StringParser::ParseResult exp_resu
             std::string str = space[i] + s + space[j];
             StringParser::ParseResult result;
             T val = StringParser::string_to_int<T>(str.data(), str.length(), &result);
+            EXPECT_EQ(exp_val, val) << str;
+            EXPECT_EQ(result, exp_result);
+        }
+    }
+}
+
+// Tests conversion of s to integer with and without leading/trailing whitespace
+template<typename T>
+void test_unsigned_int_value(const char* s, T exp_val, StringParser::ParseResult exp_result) {
+    for (int i = 0; i < space_len; ++i) {
+        for (int j = 0; j < space_len; ++j) {
+            // All combinations of leading and/or trailing whitespace.
+            std::string str = space[i] + s + space[j];
+            StringParser::ParseResult result;
+            T val = StringParser::string_to_unsigned_int<T>(str.data(), str.length(), &result);
             EXPECT_EQ(exp_val, val) << str;
             EXPECT_EQ(result, exp_result);
         }
@@ -93,7 +110,7 @@ void test_float_value_is_nan(const std::string& s, StringParser::ParseResult exp
     EXPECT_EQ(exp_result, result);
 
     if (exp_result == StringParser::PARSE_SUCCESS && result == exp_result) {
-        EXPECT_TRUE(isnan(val));
+        EXPECT_TRUE(std::isnan(val));
     }
 }
 
@@ -207,13 +224,59 @@ TEST(StringToInt, Limit) {
     test_int_value<int32_t>("2147483647", 2147483647, StringParser::PARSE_SUCCESS);
     test_int_value<int32_t>("-2147483648", -2147483648, StringParser::PARSE_SUCCESS);
     test_int_value<int64_t>(
-            "9223372036854775807",
-            std::numeric_limits<int64_t>::max(),
-            StringParser::PARSE_SUCCESS);
+        "9223372036854775807",
+        std::numeric_limits<int64_t>::max(),
+        StringParser::PARSE_SUCCESS);
     test_int_value<int64_t>(
-            "-9223372036854775808",
-            std::numeric_limits<int64_t>::min(),
-            StringParser::PARSE_SUCCESS);
+        "-9223372036854775808",
+        std::numeric_limits<int64_t>::min(),
+        StringParser::PARSE_SUCCESS);
+}
+
+TEST(StringToUnsignedInt, Basic) {
+    test_unsigned_int_value<uint8_t>("123", 123, StringParser::PARSE_SUCCESS);
+    test_unsigned_int_value<uint16_t>("123", 123, StringParser::PARSE_SUCCESS);
+    test_unsigned_int_value<uint32_t>("123", 123, StringParser::PARSE_SUCCESS);
+    test_unsigned_int_value<uint64_t>("123", 123, StringParser::PARSE_SUCCESS);
+
+    test_unsigned_int_value<uint8_t>("123", 123, StringParser::PARSE_SUCCESS);
+    test_unsigned_int_value<uint16_t>("12345", 12345, StringParser::PARSE_SUCCESS);
+    test_unsigned_int_value<uint32_t>("12345678", 12345678, StringParser::PARSE_SUCCESS);
+    test_unsigned_int_value<uint64_t>("12345678901234", 12345678901234, StringParser::PARSE_SUCCESS);
+
+    test_unsigned_int_value<uint8_t>("-10", 0, StringParser::PARSE_FAILURE);
+    test_unsigned_int_value<uint16_t>("-10", 0, StringParser::PARSE_FAILURE);
+    test_unsigned_int_value<uint32_t>("-10", 0, StringParser::PARSE_FAILURE);
+    test_unsigned_int_value<uint64_t>("-10", 0, StringParser::PARSE_FAILURE);
+
+    test_unsigned_int_value<uint8_t>("+1", 0, StringParser::PARSE_FAILURE);
+    test_unsigned_int_value<uint16_t>("+1", 0, StringParser::PARSE_FAILURE);
+    test_unsigned_int_value<uint32_t>("+1", 0, StringParser::PARSE_FAILURE);
+    test_unsigned_int_value<uint64_t>("+1", 0, StringParser::PARSE_FAILURE);
+
+    test_unsigned_int_value<uint8_t>("+0", 0, StringParser::PARSE_FAILURE);
+    test_unsigned_int_value<uint16_t>("-0", 0, StringParser::PARSE_FAILURE);
+    test_unsigned_int_value<uint32_t>("+0", 0, StringParser::PARSE_FAILURE);
+    test_unsigned_int_value<uint64_t>("-0", 0, StringParser::PARSE_FAILURE);
+}
+
+TEST(StringToUnsignedInt, Limit) {
+    test_unsigned_int_value<uint8_t>("255", 255, StringParser::PARSE_SUCCESS);
+    test_unsigned_int_value<uint16_t>("65535", 65535, StringParser::PARSE_SUCCESS);
+    test_unsigned_int_value<uint32_t>("4294967295", 4294967295, StringParser::PARSE_SUCCESS);
+    test_unsigned_int_value<uint64_t>("18446744073709551615",
+                                      std::numeric_limits<uint64_t>::max(),
+                                      StringParser::PARSE_SUCCESS);
+}
+
+TEST(StringToUnsignedInt, Overflow) {
+    test_unsigned_int_value<uint8_t>("256", 255, StringParser::PARSE_OVERFLOW);
+    test_unsigned_int_value<uint16_t>("65536", 65535, StringParser::PARSE_OVERFLOW);
+    test_unsigned_int_value<uint32_t>("4294967296", 4294967295, StringParser::PARSE_OVERFLOW);
+    test_unsigned_int_value<uint64_t>(
+        "18446744073709551616",
+        std::numeric_limits<uint64_t>::max(),
+        StringParser::PARSE_OVERFLOW);
 }
 
 TEST(StringToInt, Overflow) {
@@ -484,15 +547,15 @@ TEST(StringToFloat, BruteForce) {
     TestFloatBruteForce<double>();
 }
 
-} // end namespace palo
+} // end namespace doris
 
 int main(int argc, char** argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    // if (!palo::config::init(conffile.c_str(), false)) {
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    // if (!doris::config::init(conffile.c_str(), false)) {
     //     fprintf(stderr, "error read config file. \n");
     //     return -1;
     // }
-    palo::init_glog("be-test");
+    doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

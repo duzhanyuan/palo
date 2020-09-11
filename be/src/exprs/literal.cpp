@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -22,18 +19,11 @@
 
 #include <string>
 
-#include "codegen/llvm_codegen.h"
-#include "codegen/codegen_anyval.h"
 #include "gen_cpp/Exprs_types.h"
 #include "util/string_parser.hpp"
 #include "runtime/runtime_state.h"
 
-using llvm::BasicBlock;
-using llvm::Function;
-using llvm::Type;
-using llvm::Value;
-
-namespace palo {
+namespace doris {
 
 Literal::Literal(const TExprNode& node) : 
         Expr(node) {
@@ -81,6 +71,7 @@ Literal::Literal(const TExprNode& node) :
         _value.float_val = node.float_literal.value;
         break;
     case TYPE_DOUBLE:
+    case TYPE_TIME:
         DCHECK_EQ(node.node_type, TExprNodeType::FLOAT_LITERAL);
         DCHECK(node.__isset.float_literal);
         _value.double_val = node.float_literal.value;
@@ -100,6 +91,12 @@ Literal::Literal(const TExprNode& node) :
         DCHECK_EQ(node.node_type, TExprNodeType::DECIMAL_LITERAL);
         DCHECK(node.__isset.decimal_literal);
         _value.decimal_val = DecimalValue(node.decimal_literal.value);
+        break;
+    }
+    case TYPE_DECIMALV2: {
+        DCHECK_EQ(node.node_type, TExprNodeType::DECIMAL_LITERAL);
+        DCHECK(node.__isset.decimal_literal);
+        _value.decimalv2_val = DecimalV2Value(node.decimal_literal.value);
         break;
     }
     default: 
@@ -158,6 +155,13 @@ DecimalVal Literal::get_decimal_val(ExprContext* context, TupleRow* row) {
     return dec_val;
 }
 
+DecimalV2Val Literal::get_decimalv2_val(ExprContext* context, TupleRow* row) {
+    DCHECK_EQ(_type.type, TYPE_DECIMALV2) << _type;
+    DecimalV2Val dec_val;
+    _value.decimalv2_val.to_decimal_val(&dec_val);
+    return dec_val;
+}
+
 DateTimeVal Literal::get_datetime_val(ExprContext* context, TupleRow* row) {
     DateTimeVal dt_val;
     _value.datetime_val.to_datetime_val(&dt_val);
@@ -169,83 +173,6 @@ StringVal Literal::get_string_val(ExprContext* context, TupleRow* row) {
     StringVal str_val;
     _value.string_val.to_string_val(&str_val);
     return str_val;
-}
-
-// IR produced for bigint literal 10:
-//
-// define { i8, i64 } @Literal(i8* %context, %"class.palo::TupleRow"* %row) {
-// entry:
-//   ret { i8, i64 } { i8 0, i64 10 }
-// }
-Status Literal::get_codegend_compute_fn(RuntimeState* state, llvm::Function** fn) {
-    if (_ir_compute_fn != NULL) {
-        *fn = _ir_compute_fn;
-        return Status::OK;
-    }
-
-    DCHECK_EQ(get_num_children(), 0);
-    LlvmCodeGen* codegen = NULL;
-    RETURN_IF_ERROR(state->get_codegen(&codegen));
-    Value* args[2];
-    *fn = create_ir_function_prototype(codegen, "literal", &args);
-    BasicBlock* entry_block = BasicBlock::Create(codegen->context(), "entry", *fn);
-    LlvmCodeGen::LlvmBuilder builder(entry_block);
-
-    CodegenAnyVal v = CodegenAnyVal::get_non_null_val(codegen, &builder, _type);
-    switch (_type.type) {
-    case TYPE_BOOLEAN:
-        v.set_val(_value.bool_val);
-        break;
-    case TYPE_TINYINT:
-        v.set_val(_value.tinyint_val);
-        break;
-    case TYPE_SMALLINT:
-        v.set_val(_value.smallint_val);
-        break;
-    case TYPE_INT:
-        v.set_val(_value.int_val);
-        break;
-    case TYPE_BIGINT:
-        v.set_val(_value.bigint_val);
-        break;
-    case TYPE_LARGEINT:
-        v.set_val(_value.large_int_val);
-        break;
-    case TYPE_FLOAT:
-        v.set_val(_value.float_val);
-        break;
-    case TYPE_DOUBLE:
-        v.set_val(_value.double_val);
-        break;
-    case TYPE_CHAR:
-    case TYPE_VARCHAR:
-        v.set_len(builder.getInt32(_value.string_val.len));
-        v.set_ptr(codegen->cast_ptr_to_llvm_ptr(codegen->ptr_type(), _value.string_val.ptr));
-        break;
-    case TYPE_DECIMAL: {
-        Type* raw_ptr_type = codegen->decimal_val_type()->getPointerTo();
-        Value* raw_ptr = codegen->cast_ptr_to_llvm_ptr(raw_ptr_type, &_value.decimal_val);
-        v.set_from_raw_ptr(raw_ptr);
-        break;
-    }
-    case TYPE_DATE:
-    case TYPE_DATETIME: {
-        Type* raw_ptr_type = codegen->decimal_val_type()->getPointerTo();
-        Value* raw_ptr = codegen->cast_ptr_to_llvm_ptr(raw_ptr_type, &_value.datetime_val);
-        v.set_from_raw_ptr(raw_ptr);
-        break;
-    }
-    default:
-        std::stringstream ss;
-        ss << "Invalid type: " << _type;
-        DCHECK(false) << ss.str();
-        return Status(ss.str());
-    }
-
-    builder.CreateRet(v.value());
-    *fn = codegen->finalize_function(*fn);
-    _ir_compute_fn = *fn;
-    return Status::OK;
 }
 
 }

@@ -42,7 +42,7 @@ inline uint64 gbswap_64(uint64 host_int) {
   if (__builtin_constant_p(host_int)) {
     return __bswap_constant_64(host_int);
   } else {
-    register uint64 result;
+    uint64 result;
     __asm__("bswap %0" : "=r" (result) : "0" (host_int));
     return result;
   }
@@ -52,6 +52,18 @@ inline uint64 gbswap_64(uint64 host_int) {
   return static_cast<uint64>(bswap_32(static_cast<uint32>(host_int >> 32))) |
     (static_cast<uint64>(bswap_32(static_cast<uint32>(host_int))) << 32);
 #endif  // bswap_64
+}
+
+inline unsigned __int128 gbswap_128(unsigned __int128 host_int) {
+  return static_cast<unsigned __int128>(bswap_64(static_cast<uint64>(host_int >> 64))) |
+        (static_cast<unsigned __int128>(bswap_64(static_cast<uint64>(host_int))) << 64);
+}
+
+// Swap bytes of a 24-bit value.
+inline uint32_t bswap_24(uint32_t x) {
+    return  ((x & 0x0000ffULL) << 16) |
+        ((x & 0x00ff00ULL)) |
+        ((x & 0xff0000ULL) >> 16);
 }
 
 #ifdef IS_LITTLE_ENDIAN
@@ -78,7 +90,6 @@ inline uint64 ghtonll(uint64 x) { return x; }
 #else
 #error "Unsupported bytesex: Either IS_BIG_ENDIAN or IS_LITTLE_ENDIAN must be defined"  // NOLINT
 #endif  // bytesex
-
 
 // ntoh* and hton* are the same thing for any size and bytesex,
 // since the function is an involution, i.e., its own inverse.
@@ -108,6 +119,9 @@ class LittleEndian {
 
   static uint64 FromHost64(uint64 x) { return x; }
   static uint64 ToHost64(uint64 x) { return x; }
+
+  static unsigned __int128 FromHost128(unsigned __int128 x) { return x; }
+  static unsigned __int128 ToHost128(unsigned __int128 x) { return x; }
 
   static bool IsLittleEndian() { return true; }
 
@@ -202,8 +216,8 @@ class LittleEndian {
       return uint128(Load64VariableLength(p, len));
     } else {
       return uint128(
-          Load64VariableLength(static_cast<const char *>(p) + 8, len - 8),
-          Load64(p));
+        Load64VariableLength(static_cast<const char *>(p) + 8, len - 8),
+        Load64(p));
     }
   }
 
@@ -234,11 +248,17 @@ class BigEndian {
   static uint16 FromHost16(uint16 x) { return bswap_16(x); }
   static uint16 ToHost16(uint16 x) { return bswap_16(x); }
 
+  static uint32 FromHost24(uint32 x) { return bswap_24(x); }
+  static uint32 ToHost24(uint32 x) { return bswap_24(x); }
+
   static uint32 FromHost32(uint32 x) { return bswap_32(x); }
   static uint32 ToHost32(uint32 x) { return bswap_32(x); }
 
   static uint64 FromHost64(uint64 x) { return gbswap_64(x); }
   static uint64 ToHost64(uint64 x) { return gbswap_64(x); }
+
+  static unsigned __int128 FromHost128(unsigned __int128 x) { return gbswap_128(x); }
+  static unsigned __int128 ToHost128(unsigned __int128 x) { return gbswap_128(x); }
 
   static bool IsLittleEndian() { return true; }
 
@@ -247,11 +267,17 @@ class BigEndian {
   static uint16 FromHost16(uint16 x) { return x; }
   static uint16 ToHost16(uint16 x) { return x; }
 
+    static uint32 FromHost24(uint32 x) { return x; }
+    static uint32 ToHost24(uint32 x) { return x; }
+
   static uint32 FromHost32(uint32 x) { return x; }
   static uint32 ToHost32(uint32 x) { return x; }
 
   static uint64 FromHost64(uint64 x) { return x; }
   static uint64 ToHost64(uint64 x) { return x; }
+
+  static uint128 FromHost128(uint128 x) { return x; }
+  static uint128 ToHost128(uint128 x) { return x; }
 
   static bool IsLittleEndian() { return false; }
 
@@ -318,7 +344,7 @@ class BigEndian {
   static void Store128(void *p, const uint128 v) {
     UNALIGNED_STORE64(p, FromHost64(Uint128High64(v)));
     UNALIGNED_STORE64(reinterpret_cast<uint64 *>(p) + 1,
-                      FromHost64(Uint128Low64(v)));
+                FromHost64(Uint128Low64(v)));
   }
 
   // Build a uint128 from 1-16 bytes.
@@ -328,11 +354,11 @@ class BigEndian {
   static uint128 Load128VariableLength(const void *p, int len) {
     if (len <= 8) {
       return uint128(Load64VariableLength(static_cast<const char *>(p)+8,
-                                          len));
+                        len));
     } else {
       return uint128(
-          Load64VariableLength(p, len-8),
-          Load64(static_cast<const char *>(p)+8));
+        Load64VariableLength(p, len-8),
+        Load64(static_cast<const char *>(p)+8));
     }
   }
 

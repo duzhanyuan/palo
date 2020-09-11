@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -20,13 +22,14 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include "common/configbase.h"
 #include "util/logging.h"
 
 using std::vector;
 using boost::thread;
 using boost::thread_group;
 
-namespace palo {
+namespace doris {
 
 struct IntNode : public InternalQueue<IntNode>::Node {
     IntNode() : value() {}
@@ -261,7 +264,7 @@ TEST(InternalQueue, TestMultiProducerMultiConsumer) {
         const int num_per_consumer = nodes.size() / NUM_CONSUMERS;
         const int num_per_producer = nodes.size() / num_producers;
 
-        vector<vector<int> > results;
+        vector<vector<int>> results;
         results.resize(NUM_CONSUMERS);
 
         int expected_delta = -1;
@@ -311,15 +314,15 @@ TEST(InternalQueue, TestMultiProducerMultiConsumer) {
     }
 }
 
-} // end namespace palo
+} // end namespace doris
 
 int main(int argc, char** argv) {
-    // std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    // if (!palo::config::init(conffile.c_str(), false)) {
-    //     fprintf(stderr, "error read config file. \n");
-    //     return -1;
-    // }
-    palo::init_glog("be-test");
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
+        fprintf(stderr, "error read config file. \n");
+        return -1;
+    }
+    doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

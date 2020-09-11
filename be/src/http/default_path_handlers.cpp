@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -15,20 +17,21 @@
 
 #include "http/default_path_handlers.h"
 
-#include <sstream>
-#include <fstream>
-#include <sys/stat.h>
-#include <boost/algorithm/string.hpp>
-#include <boost/bind.hpp>
 #include <gperftools/malloc_extension.h>
 
-#include "common/logging.h"
+#include <boost/algorithm/string.hpp>
+#include <boost/bind.hpp>
+#include <sstream>
+
+#include "common/configbase.h"
+#include "http/web_page_handler.h"
 #include "runtime/mem_tracker.h"
 #include "util/debug_util.h"
-#include "util/logging.h"
-#include "http/web_page_handler.h"
+#include "util/pretty_printer.h"
+#include "util/thread.h"
+#include "http/action/tablets_info_action.h"
 
-namespace palo {
+namespace doris {
 
 // Writes the last config::web_log_bytes of the INFO logfile to a webpage
 // Note to get best performance, set GLOG_logbuflevel=-1 to prevent log buffering
@@ -57,27 +60,27 @@ void logs_handler(const WebPageHandler::ArgumentMap& args, std::stringstream* ou
     }*/
 
     (*output) << "<br/>Couldn't open INFO log file: ";
-
-
 }
 
-// Registered to handle "/flags", and prints out all command-line flags and their values
+// Registered to handle "/varz", and prints out all command-line flags and their values
 void config_handler(const WebPageHandler::ArgumentMap& args, std::stringstream* output) {
-    (*output) << "<h2>Command-line Flags</h2>";
-    // (*output) << "<pre>" << google::CommandlineFlagsIntoString() << "</pre>";
+    (*output) << "<h2>Configurations</h2>";
+    (*output) << "<pre>";
+    for (const auto& it : *(config::full_conf_map)) {
+        (*output) << it.first << "=" << it.second << std::endl;
+    }
+    (*output) << "</pre>";
 }
 
 // Registered to handle "/memz", and prints out memory allocation statistics.
-void mem_usage_handler(MemTracker* mem_tracker, const WebPageHandler::ArgumentMap& args,
-                     std::stringstream* output) {
-    if (mem_tracker != NULL) {
+void mem_usage_handler(const std::shared_ptr<MemTracker>& mem_tracker,
+                       const WebPageHandler::ArgumentMap& args, std::stringstream* output) {
+    if (mem_tracker != nullptr) {
         (*output) << "<pre>"
-                  << "Mem Limit: "
-                  << PrettyPrinter::print(mem_tracker->limit(), TUnit::BYTES)
+                  << "Mem Limit: " << PrettyPrinter::print(mem_tracker->limit(), TUnit::BYTES)
                   << std::endl
                   << "Mem Consumption: "
-                  << PrettyPrinter::print(mem_tracker->consumption(), TUnit::BYTES)
-                  << std::endl
+                  << PrettyPrinter::print(mem_tracker->consumption(), TUnit::BYTES) << std::endl
                   << "</pre>";
     } else {
         (*output) << "<pre>"
@@ -86,7 +89,7 @@ void mem_usage_handler(MemTracker* mem_tracker, const WebPageHandler::ArgumentMa
     }
 
     (*output) << "<pre>";
-#ifdef ADDRESS_SANITIZER
+#if defined(ADDRESS_SANITIZER) || defined(LEAK_SANITIZER) || defined(THREAD_SANITIZER)
     (*output) << "Memory tracking is not available with address sanitizer builds.";
 #else
     char buf[2048];
@@ -98,12 +101,28 @@ void mem_usage_handler(MemTracker* mem_tracker, const WebPageHandler::ArgumentMa
 #endif
 }
 
-void add_default_path_handlers(WebPageHandler* web_page_handler, MemTracker* process_mem_tracker) {
-    web_page_handler->register_page("/logs", logs_handler);
-    web_page_handler->register_page("/varz", config_handler);
-    web_page_handler->register_page(
-            "/memz",
-            boost::bind<void>(&mem_usage_handler, process_mem_tracker, _1, _2));
+void display_tablets_callback(const WebPageHandler::ArgumentMap& args, EasyJson* ej) {
+    TabletsInfoAction tablet_info_action;
+    std::string tablet_num_to_return;
+    WebPageHandler::ArgumentMap::const_iterator it = args.find("limit");
+    if (it != args.end()) {
+        tablet_num_to_return = it->second;
+    } else {
+        tablet_num_to_return = "1000"; // default
+    }
+    (*ej) = tablet_info_action.get_tablets_info(tablet_num_to_return);
 }
 
+void add_default_path_handlers(WebPageHandler* web_page_handler,
+                               const std::shared_ptr<MemTracker>& process_mem_tracker) {
+    // TODO(yingchun): logs_handler is not implemented yet, so not show it on navigate bar
+    web_page_handler->register_page("/logs", "Logs", logs_handler, false /* is_on_nav_bar */);
+    web_page_handler->register_page("/varz", "Configs", config_handler, true /* is_on_nav_bar */);
+    web_page_handler->register_page(
+            "/memz", "Memory", boost::bind<void>(&mem_usage_handler, process_mem_tracker, _1, _2),
+            true /* is_on_nav_bar */);
+    register_thread_display_page(web_page_handler);
+    web_page_handler->register_template_page("/tablets_page", "Tablets", boost::bind<void>(&display_tablets_callback, _1, _2), true /* is_on_nav_bar */);
 }
+
+} // namespace doris

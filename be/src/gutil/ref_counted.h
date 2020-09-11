@@ -6,12 +6,14 @@
 #define BASE_MEMORY_REF_COUNTED_H_
 
 #include <cassert>
+#include <cstddef>
+#include <utility>  // IWYU pragma: keep
 
-#include "gutil/atomic_refcount.h"
-#include "gutil/port.h"
+#include "gutil/atomicops.h"
+#include "gutil/macros.h"
 #include "gutil/threading/thread_collision_warner.h"
 
-namespace kudu {
+namespace doris {
 namespace subtle {
 
 typedef Atomic32 AtomicRefCount;
@@ -128,7 +130,7 @@ struct DefaultRefCountedThreadSafeTraits {
 //    private:
 //     friend class RefCountedThreadSafe<MyFoo>;
 //     ~MyFoo();
-template <class T, typename Traits = DefaultRefCountedThreadSafeTraits<T> >
+template <class T, typename Traits = DefaultRefCountedThreadSafeTraits<T>>
 class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
  public:
   RefCountedThreadSafe() {}
@@ -159,7 +161,7 @@ class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
 //
 template<typename T>
 class RefCountedData
-    : public kudu::RefCountedThreadSafe< kudu::RefCountedData<T> > {
+    : public doris::RefCountedThreadSafe< doris::RefCountedData<T>> {
  public:
   RefCountedData() : data() {}
   RefCountedData(const T& in_value) : data(in_value) {}
@@ -167,11 +169,11 @@ class RefCountedData
   T data;
 
  private:
-  friend class kudu::RefCountedThreadSafe<kudu::RefCountedData<T> >;
+  friend class doris::RefCountedThreadSafe<doris::RefCountedData<T>>;
   ~RefCountedData() {}
 };
 
-}  // namespace kudu
+}  // namespace doris
 
 //
 // A smart pointer class for reference counted objects.  Use this class instead
@@ -234,19 +236,28 @@ class scoped_refptr {
       ptr_->AddRef();
   }
 
+  // Copy constructor.
   scoped_refptr(const scoped_refptr<T>& r) : ptr_(r.ptr_) {
     if (ptr_)
       ptr_->AddRef();
   }
 
+  // Copy conversion constructor.
   template <typename U>
   scoped_refptr(const scoped_refptr<U>& r) : ptr_(r.get()) {
     if (ptr_)
       ptr_->AddRef();
   }
 
+  // Move constructor. This is required in addition to the conversion
+  // constructor below in order for clang to warn about pessimizing moves.
+  scoped_refptr(scoped_refptr&& r) noexcept : ptr_(r.get()) { // NOLINT
+    r.ptr_ = nullptr;
+  }
+
+  // Move conversion constructor.
   template <typename U>
-  scoped_refptr(scoped_refptr<U>&& r) : ptr_(r.get()) {
+  scoped_refptr(scoped_refptr<U>&& r) noexcept : ptr_(r.get()) { // NOLINT
     r.ptr_ = nullptr;
   }
 
@@ -257,7 +268,7 @@ class scoped_refptr {
 
   T* get() const { return ptr_; }
 
-// The following is disabled in Cloudera's version of this file since it's
+// The following is disabled in Kudu's version of this file since it's
 // relatively dangerous. Chromium is planning on doing the same in their
 // tree, but hasn't done so yet. See http://code.google.com/p/chromium/issues/detail?id=110610
 #if SCOPED_REFPTR_ALLOW_IMPLICIT_CONVERSION_TO_PTR
@@ -295,13 +306,13 @@ class scoped_refptr {
   }
 
   scoped_refptr<T>& operator=(scoped_refptr<T>&& r) {
-    scoped_refptr<T>(r).swap(*this);
+    scoped_refptr<T>(std::move(r)).swap(*this);
     return *this;
   }
 
   template <typename U>
   scoped_refptr<T>& operator=(scoped_refptr<U>&& r) {
-    scoped_refptr<T>(r).swap(*this);
+    scoped_refptr<T>(std::move(r)).swap(*this);
     return *this;
   }
 

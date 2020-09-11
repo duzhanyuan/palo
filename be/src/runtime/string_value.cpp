@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -22,11 +19,13 @@
 #include "runtime/string_value.h"
 #include <cstring>
 
-namespace palo {
-
-const char* StringValue::s_llvm_class_name = "struct.palo::StringValue";
+namespace doris {
 
 std::string StringValue::debug_string() const {
+    return std::string(ptr, len);
+}
+
+std::string StringValue::to_string() const {
     return std::string(ptr, len);
 }
 

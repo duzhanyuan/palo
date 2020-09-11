@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -17,14 +19,13 @@
 
 #include <string>
 
-#include "olap/column_file/bloom_filter_reader.h"
-#include "olap/column_file/bloom_filter_writer.h"
+#include "olap/bloom_filter_reader.h"
+#include "olap/bloom_filter_writer.h"
 #include "util/logging.h"
 
 using std::string;
 
-namespace palo {
-namespace column_file {
+namespace doris {
 
 class TestBloomFilterIndex : public testing::Test {
 public:
@@ -49,7 +50,7 @@ TEST_F(TestBloomFilterIndex, normal_read_and_write) {
 
     BloomFilter* bf_1 = new(std::nothrow) BloomFilter();
     bf_1->init(1024);
-    bytes = "palo";
+    bytes = "doris";
     bf_1->add_bytes(bytes.c_str(), bytes.size());
     writer.add_bloom_filter(bf_1);
 
@@ -69,7 +70,7 @@ TEST_F(TestBloomFilterIndex, normal_read_and_write) {
     ASSERT_TRUE(bf__0.test_bytes(NULL, 0));
     ASSERT_TRUE(bf__0.test_bytes(bytes.c_str(), bytes.size()));
 
-    bytes = "palo";
+    bytes = "doris";
     const BloomFilter& bf__1 = reader.entry(1);
     ASSERT_TRUE(bf__1.test_bytes(bytes.c_str(), bytes.size()));
 }
@@ -101,16 +102,9 @@ TEST_F(TestBloomFilterIndex, abnormal_read) {
             reader.init(buffer, buffer_size, true, hash_function_num, bit_num));
 }
 
-} // namespace column_file
-} // namespace palo
+} // namespace doris
 
 int main(int argc, char **argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    if (!palo::config::init(conffile.c_str(), false)) {
-        fprintf(stderr, "error read config file. \n");
-        return -1;
-    }
-    palo::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

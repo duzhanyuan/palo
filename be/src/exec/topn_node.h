@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXEC_TOPN_NODE_H
-#define BDG_PALO_BE_SRC_QUERY_EXEC_TOPN_NODE_H
+#ifndef DORIS_BE_SRC_QUERY_EXEC_TOPN_NODE_H
+#define DORIS_BE_SRC_QUERY_EXEC_TOPN_NODE_H
 
 #include <boost/scoped_ptr.hpp>
 #include <queue>
@@ -28,7 +25,7 @@
 #include "runtime/descriptors.h"
 #include "util/tuple_row_compare.h"
 
-namespace palo {
+namespace doris {
 
 class MemPool;
 class RuntimeState;
@@ -43,7 +40,7 @@ public:
     TopNNode(ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs);
     virtual ~TopNNode();
 
-    virtual Status init(const TPlanNode& tnode);
+    virtual Status init(const TPlanNode& tnode, RuntimeState* state = nullptr);
 
     virtual Status prepare(RuntimeState* state);
     virtual Status open(RuntimeState* state);
@@ -111,7 +108,7 @@ private:
     // of the queue is the last sorted element.
     boost::scoped_ptr<
         std::priority_queue<
-        Tuple*, std::vector<Tuple*>, TupleRowComparator> > _priority_queue;
+        Tuple*, std::vector<Tuple*>, TupleRowComparator>> _priority_queue;
 
     // END: Members that must be Reset()
     /////////////////////////////////////////

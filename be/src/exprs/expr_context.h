@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXPRS_EXPR_CONTEXT_H
-#define BDG_PALO_BE_SRC_QUERY_EXPRS_EXPR_CONTEXT_H
+#ifndef DORIS_BE_SRC_QUERY_EXPRS_EXPR_CONTEXT_H
+#define DORIS_BE_SRC_QUERY_EXPRS_EXPR_CONTEXT_H
 
 #include <memory>
 
@@ -28,12 +25,12 @@
 #include "udf/udf.h"
 #include "udf/udf_internal.h" // for ArrayVal
 
-#undef USING_PALO_UDF
-#define USING_PALO_UDF using namespace palo_udf
+#undef USING_DORIS_UDF
+#define USING_DORIS_UDF using namespace doris_udf
 
-USING_PALO_UDF;
+USING_DORIS_UDF;
 
-namespace palo {
+namespace doris {
 
 class Expr;
 class MemPool;
@@ -55,12 +52,15 @@ public:
     /// Prepare expr tree for evaluation.
     /// Allocations from this context will be counted against 'tracker'.
     Status prepare(RuntimeState* state, const RowDescriptor& row_desc,
-                   MemTracker* tracker);
+                   const std::shared_ptr<MemTracker>& tracker);
 
     /// Must be called after calling Prepare(). Does not need to be called on clones.
     /// Idempotent (this allows exprs to be opened multiple times in subplans without
     /// reinitializing function state).
     Status open(RuntimeState* state);
+
+    //TODO chenhao
+    static Status open(std::vector<ExprContext*> input_evals, RuntimeState* state);
 
     /// Creates a copy of this ExprContext. Open() must be called first. The copy contains
     /// clones of each FunctionContext, which share the fragment-local state of the
@@ -142,6 +142,7 @@ public:
     // ArrayVal GetArrayVal(TupleRow* row);
     DateTimeVal get_datetime_val(TupleRow* row);
     DecimalVal get_decimal_val(TupleRow* row);
+    DecimalV2Val get_decimalv2_val(TupleRow* row);
 
     /// Frees all local allocations made by fn_contexts_. This can be called when result
     /// data from this context is no longer needed.
@@ -149,13 +150,35 @@ public:
     static void free_local_allocations(const std::vector<ExprContext*>& ctxs);
     static void free_local_allocations(const std::vector<FunctionContext*>& ctxs);
 
-    static const char* _s_llvm_class_name;
+    bool opened() {
+       return _opened; 
+    }
 
+    /// If 'expr' is constant, evaluates it with no input row argument and returns the
+    /// result in 'const_val'. Sets 'const_val' to NULL if the argument is not constant.
+    /// The returned AnyVal and associated varlen data is owned by this evaluator. This
+    /// should only be called after Open() has been called on this expr. Returns an error
+    /// if there was an error evaluating the expression or if memory could not be allocated
+    /// for the expression result.
+    Status get_const_value(RuntimeState* state, Expr& expr, AnyVal** const_val);
+
+    /// Returns an error status if there was any error in evaluating the expression
+    /// or its sub-expressions. 'start_idx' and 'end_idx' correspond to the range
+    /// within the vector of FunctionContext for the sub-expressions of interest.
+    /// The default parameters correspond to the entire expr 'root_'.
+    Status get_error(int start_idx, int end_idx) const;
+
+    std::string get_error_msg() const;
+
+    // when you reused this expr context, you maybe need clear the error status and message.
+    void clear_error_msg();
 private:
     friend class Expr;
     friend class ScalarFnCall;
     friend class InPredicate;
     friend class OlapScanNode;
+    friend class EsScanNode;
+    friend class EsPredicate;
 
     /// FunctionContexts for each registered expression. The FunctionContexts are created
     /// and owned by this ExprContext.

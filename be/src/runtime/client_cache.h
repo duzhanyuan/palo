@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_RUNTIME_CLIENT_CACHE_H
-#define BDG_PALO_BE_RUNTIME_CLIENT_CACHE_H
+#ifndef DORIS_BE_RUNTIME_CLIENT_CACHE_H
+#define DORIS_BE_RUNTIME_CLIENT_CACHE_H
 
 #include <vector>
 #include <list>
@@ -32,7 +29,7 @@
 #include "util/thrift_client.h"
 #include "common/status.h"
 
-namespace palo {
+namespace doris {
 
 // Helper class which implements the majority of the caching
 // functionality without using templates (i.e. pointers to the
@@ -59,7 +56,7 @@ namespace palo {
 // TODO: limits on total number of clients, and clients per-backend
 class ClientCacheHelper {
 public:
-    ~ClientCacheHelper() {}
+    ~ClientCacheHelper();
     // Callback method which produces a client object when one cannot be
     // found in the cache. Supplied by the ClientCache wrapper.
     typedef boost::function < ThriftClientImpl* (const TNetworkAddress& hostport,
@@ -87,12 +84,16 @@ public:
 
     void test_shutdown();
 
-    void init_metrics(MetricGroup* metrics, const std::string& key_prefix);
+    void init_metrics(const std::string& name);
 
 private:
     template <class T> friend class ClientCache;
     // Private constructor so that only ClientCache can instantiate this class.
-    ClientCacheHelper() : _metrics_enabled(false) { }
+    ClientCacheHelper() : _metrics_enabled(false), _max_cache_size_per_host(-1) { }
+
+    ClientCacheHelper(int max_cache_size_per_host):
+        _metrics_enabled(false),
+        _max_cache_size_per_host(max_cache_size_per_host) { }
 
     // Protects all member variables
     // TODO: have more fine-grained locks or use lock-free data structures,
@@ -101,21 +102,25 @@ private:
 
     // map from (host, port) to list of client keys for that address
     typedef boost::unordered_map <
-    TNetworkAddress, std::list<void*> > ClientCacheMap;
+    TNetworkAddress, std::list<void*>> ClientCacheMap;
     ClientCacheMap _client_cache;
 
     // Map from client key back to its associated ThriftClientImpl transport
     typedef boost::unordered_map<void*, ThriftClientImpl*> ClientMap;
     ClientMap _client_map;
 
-    // MetricGroup
     bool _metrics_enabled;
 
+    // max connections per host in this cache, -1 means unlimited
+    int _max_cache_size_per_host;
+
+    std::shared_ptr<MetricEntity> _thrift_client_metric_entity;
+
     // Number of clients 'checked-out' from the cache
-    IntGauge* _clients_in_use_metric;
+    IntGauge* thrift_used_clients;
 
     // Total clients in the cache, including those in use
-    IntGauge* _total_clients_metric;
+    IntGauge* thrift_opened_clients;
 
     // Create a new client for specific host/port in 'client' and put it in _client_map
     Status create_client(const TNetworkAddress& hostport, client_factory factory_method,
@@ -129,7 +134,7 @@ class ClientCache;
 //
 // Example:
 //   {
-//     PaloInternalServiceConnection client(cache, address, &status);
+//     DorisInternalServiceConnection client(cache, address, &status);
 //     try {
 //       client->TransmitData(...);
 //     } catch (TTransportException& e) {
@@ -199,6 +204,12 @@ public:
                 boost::mem_fn(&ClientCache::make_client), this, _1, _2);
     }
 
+    ClientCache(int max_cache_size) : _client_cache_helper(max_cache_size) {
+        _client_factory =
+            boost::bind<ThriftClientImpl*>(
+                boost::mem_fn(&ClientCache::make_client), this, _1, _2);
+    }
+
     // Close all clients connected to the supplied address, (e.g., in
     // case of failure) so that on their next use they will have to be
     // Reopen'ed.
@@ -216,12 +227,12 @@ public:
         return _client_cache_helper.test_shutdown();
     }
 
-    // Adds metrics for this cache to the supplied MetricGroup instance. The
-    // metrics have keys that are prefixed by the key_prefix argument
+    // Adds metrics for this cache.
+    // The metrics have an identification by the 'name' argument
     // (which should not end in a period).
     // Must be called before the cache is used, otherwise the metrics might be wrong
-    void init_metrics(MetricGroup* metrics, const std::string& key_prefix) {
-        _client_cache_helper.init_metrics(metrics, key_prefix);
+    void init_metrics(const std::string& name) {
+        _client_cache_helper.init_metrics(name);
     }
 
 private:
@@ -237,7 +248,7 @@ private:
 
     // Obtains a pointer to a Thrift interface object (of type T),
     // backed by a live transport which is already open. Returns
-    // Status::OK unless there was an error opening the transport.
+    // Status::OK() unless there was an error opening the transport.
     Status get_client(const TNetworkAddress& hostport, T** iface, int timeout_ms) {
         return _client_cache_helper.get_client(hostport, _client_factory,
                                               reinterpret_cast<void**>(iface), timeout_ms);
@@ -266,7 +277,7 @@ private:
 
 };
 
-// Palo backend client cache, used by a backend to send requests
+// Doris backend client cache, used by a backend to send requests
 // to any other backend.
 class BackendServiceClient;
 typedef ClientCache<BackendServiceClient> BackendServiceClientCache;
@@ -277,6 +288,9 @@ typedef ClientConnection<FrontendServiceClient> FrontendServiceConnection;
 class TPaloBrokerServiceClient;
 typedef ClientCache<TPaloBrokerServiceClient> BrokerServiceClientCache;
 typedef ClientConnection<TPaloBrokerServiceClient> BrokerServiceConnection;
+class TExtDataSourceServiceClient;
+typedef ClientCache<TExtDataSourceServiceClient> ExtDataSourceServiceClientCache;
+typedef ClientConnection<TExtDataSourceServiceClient> ExtDataSourceServiceConnection;
 
 }
 

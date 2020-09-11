@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -31,7 +28,7 @@
 // #include "util/decimal_util.h"
 #include "util/string_parser.hpp"
 
-namespace palo {
+namespace doris {
 
 void DecimalOperators::init() {
 }
@@ -74,6 +71,20 @@ DecimalVal DecimalOperators::cast_to_decimal_val(
     }
     DecimalValue dv;
     dv.assign_from_double(val.val);
+    DecimalVal result;
+    dv.to_decimal_val(&result);
+    return result;
+}
+
+DecimalVal DecimalOperators::cast_to_decimal_val(
+        FunctionContext* context, const DateTimeVal& val) {
+    if (val.is_null) {
+        return DecimalVal::null();
+    }
+
+    DateTimeValue dt_value = DateTimeValue::from_datetime_val(val);
+    
+    DecimalValue dv = dt_value.to_int64();
     DecimalVal result;
     dv.to_decimal_val(&result);
     return result;

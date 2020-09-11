@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_COMMON_UTIL_PRIORITY_THREAD_POOL_HPP
-#define BDG_PALO_BE_SRC_COMMON_UTIL_PRIORITY_THREAD_POOL_HPP
+#ifndef DORIS_BE_SRC_COMMON_UTIL_PRIORITY_THREAD_POOL_HPP
+#define DORIS_BE_SRC_COMMON_UTIL_PRIORITY_THREAD_POOL_HPP
 
 #include "util/blocking_priority_queue.hpp"
 
@@ -27,7 +24,7 @@
 #include <boost/thread/mutex.hpp>
 #include <boost/bind/mem_fn.hpp>
 
-namespace palo {
+namespace doris {
 
 // Simple threadpool which processes items (of type T) in parallel which were placed on a
 // blocking queue by Offer(). Each item is processed by a single user-supplied method.
@@ -59,7 +56,6 @@ public:
     //     capacity available.
     //  -- work_function: the function to run every time an item is consumed from the queue
     PriorityThreadPool(uint32_t num_threads, uint32_t queue_size) :
-            _thread_num(num_threads),
             _work_queue(queue_size),
             _shutdown(false) {
         for (int i = 0; i < num_threads; ++i) {
@@ -88,6 +84,11 @@ public:
     // Returns true if the work item was successfully added to the queue, false otherwise
     // (which typically means that the thread pool has already been shut down).
     bool offer(Task task) {
+        return _work_queue.blocking_put(task);
+    }
+
+    bool offer(WorkFunction func) {
+        PriorityThreadPool::Task task = {0, func};
         return _work_queue.blocking_put(task);
     }
 
@@ -147,8 +148,6 @@ private:
         boost::lock_guard<boost::mutex> l(_lock);
         return _shutdown;
     }
-
-    uint32_t _thread_num;
 
     // Queue on which work items are held until a thread is available to process them in
     // FIFO order.

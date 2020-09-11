@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -13,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef  BDG_PALO_BE_SRC_QUERY_EXEC_OLAP_UTILS_H
-#define  BDG_PALO_BE_SRC_QUERY_EXEC_OLAP_UTILS_H
+#ifndef  DORIS_BE_SRC_QUERY_EXEC_OLAP_UTILS_H
+#define  DORIS_BE_SRC_QUERY_EXEC_OLAP_UTILS_H
 
 #include <math.h>
 
@@ -22,8 +24,9 @@
 #include "gen_cpp/Opcodes_types.h"
 #include "runtime/primitive_type.h"
 #include "runtime/datetime_value.h"
+#include "olap/tuple.h"
 
-namespace palo {
+namespace doris {
 
 typedef bool (*CompareLargeFunc)(const void*, const void*);
 
@@ -65,6 +68,9 @@ inline CompareLargeFunc get_compare_func(PrimitiveType type) {
     case TYPE_DECIMAL:
         return compare_large<DecimalValue>;
 
+    case TYPE_DECIMALV2:
+        return compare_large<DecimalV2Value>;
+
     case TYPE_CHAR:
     case TYPE_VARCHAR:
         return compare_large<StringValue>;
@@ -80,8 +86,8 @@ static const char* POSITIVE_INFINITY = "+oo";
 typedef struct OlapScanRange {
 public:
     OlapScanRange() : begin_include(true), end_include(true) {
-        begin_scan_range.push_back(NEGATIVE_INFINITY);
-        end_scan_range.push_back(POSITIVE_INFINITY);
+        begin_scan_range.add_value(NEGATIVE_INFINITY);
+        end_scan_range.add_value(POSITIVE_INFINITY);
     }
     OlapScanRange(
         bool begin,
@@ -93,8 +99,8 @@ public:
 
     bool begin_include;
     bool end_include;
-    std::vector<std::string> begin_scan_range;
-    std::vector<std::string> end_scan_range;
+    OlapTuple begin_scan_range;
+    OlapTuple end_scan_range;
 } OlapScanRange;
 
 static char encoding_table[] = {
@@ -179,6 +185,7 @@ inline int get_olap_size(PrimitiveType type) {
         return 8;
     }
 
+    case TYPE_DECIMALV2:
     case TYPE_DECIMAL: {
         return 12;
     }
@@ -219,7 +226,7 @@ inline SQLFilterOp to_olap_filter_type(TExprOpcode::type type, bool opposite) {
     return FILTER_IN;
 }
 
-} // namespace palo
+} // namespace doris
 
 #endif
 

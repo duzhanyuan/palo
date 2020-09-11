@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_RUNTIME_DATA_STREAM_MGR_H
-#define BDG_PALO_BE_SRC_RUNTIME_DATA_STREAM_MGR_H
+#ifndef DORIS_BE_SRC_RUNTIME_DATA_STREAM_MGR_H
+#define DORIS_BE_SRC_RUNTIME_DATA_STREAM_MGR_H
 
 #include <list>
 #include <set>
@@ -33,25 +30,29 @@
 #include "common/object_pool.h"
 #include "runtime/descriptors.h"  // for PlanNodeId
 #include "runtime/mem_tracker.h"
+#include "runtime/query_statistics.h"
 #include "util/runtime_profile.h"
+#include "gen_cpp/palo_internal_service.pb.h"
 #include "gen_cpp/Types_types.h"  // for TUniqueId
 
-#include "rpc/inet_addr.h"
+namespace google {
+namespace protobuf {
+class Closure;
+}
+}
 
-namespace palo {
+namespace doris {
 
 class DescriptorTbl;
 class DataStreamRecvr;
 class RowBatch;
 class RuntimeState;
-class TRowBatch;
-class Comm;
-class CommBuf;
-typedef std::shared_ptr<CommBuf> CommBufPtr;
+class PRowBatch;
+class PUniqueId;
 
 // Singleton class which manages all incoming data streams at a backend node. It
 // provides both producer and consumer functionality for each data stream.
-// - paloBackend service threads use this to add incoming data to streams
+// - dorisBackend service threads use this to add incoming data to streams
 //   in response to TransmitData rpcs (add_data()) or to signal end-of-stream conditions
 //   (close_sender()).
 // - Exchange nodes extract data from an incoming stream via a DataStreamRecvr,
@@ -65,7 +66,8 @@ typedef std::shared_ptr<CommBuf> CommBufPtr;
 // per-query memory limits.
 class DataStreamMgr {
 public:
-    DataStreamMgr() {}
+    DataStreamMgr();
+    ~DataStreamMgr();
 
     // Create a receiver for a specific fragment_instance_id/node_id destination;
     // If is_merging is true, the receiver maintains a separate queue of incoming row
@@ -77,29 +79,9 @@ public:
             RuntimeState* state, const RowDescriptor& row_desc,
             const TUniqueId& fragment_instance_id, PlanNodeId dest_node_id,
             int num_senders, int buffer_size, RuntimeProfile* profile,
-            bool is_merging);
+            bool is_merging, std::shared_ptr<QueryStatisticsRecvr> sub_plan_query_statistics_recvr);
 
-    // Adds a row batch to the recvr identified by fragment_instance_id/dest_node_id
-    // if the recvr has not been cancelled. sender_id identifies the sender instance
-    // from which the data came.
-    // The call blocks if this ends up pushing the stream over its buffering limit;
-    // it unblocks when the consumer removed enough data to make space for
-    // row_batch.
-    // TODO: enforce per-sender quotas (something like 200% of buffer_size/#senders),
-    // so that a single sender can't flood the buffer and stall everybody else.
-    // Returns OK if successful, error status otherwise.
-    Status add_data(const TUniqueId& fragment_instance_id, PlanNodeId dest_node_id,
-            const TRowBatch& thrift_batch, int sender_id, bool* buffer_overflow,
-                    std::pair<InetAddr, CommBufPtr> response);
-    // Status add_data(const TUniqueId& fragment_instance_id, PlanNodeId dest_node_id,
-    //                 const TRowBatch& thrift_batch, bool* buffer_overflow,
-    //                 std::pair<InetAddr, CommBufPtr> response);
-
-    // Notifies the recvr associated with the fragment/node id that the specified
-    // sender has closed.
-    // Returns OK if successful, error status otherwise.
-    Status close_sender(const TUniqueId& fragment_instance_id, PlanNodeId dest_node_id,
-            int sender_id, int be_number);
+    Status transmit_data(const PTransmitDataParams* request, ::google::protobuf::Closure** done);
 
     // Closes all receivers registered for fragment_instance_id immediately.
     void cancel(const TUniqueId& fragment_instance_id);
@@ -116,13 +98,13 @@ private:
     // we don't want to create a map<pair<TUniqueId, PlanNodeId>, DataStreamRecvr*>,
     // because that requires a bunch of copying of ids for lookup
     typedef boost::unordered_multimap<uint32_t,
-            boost::shared_ptr<DataStreamRecvr> > StreamMap;
+            boost::shared_ptr<DataStreamRecvr>> StreamMap;
     StreamMap _receiver_map;
 
     // less-than ordering for pair<TUniqueId, PlanNodeId>
     struct ComparisonOp {
-        bool operator()(const std::pair<palo::TUniqueId, PlanNodeId>& a,
-                const std::pair<palo::TUniqueId, PlanNodeId>& b) {
+        bool operator()(const std::pair<doris::TUniqueId, PlanNodeId>& a,
+                const std::pair<doris::TUniqueId, PlanNodeId>& b) {
             if (a.first.hi < b.first.hi) {
                 return true;
             } else if (a.first.hi > b.first.hi) {

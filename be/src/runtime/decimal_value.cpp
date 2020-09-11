@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -15,14 +17,11 @@
 
 #include "runtime/decimal_value.h"
 
-#include <mysql/mysql.h>
 #include <algorithm>
 #include <iostream>
 #include <utility>
 
-namespace palo {
-
-const char* DecimalValue::_s_llvm_class_name = "class.palo::DecimalValue";
+namespace doris {
 
 // set the 1st param if the second param is smaller.
 template<typename T> inline void set_if_smaller(T* num1_ptr, const T num2) {
@@ -82,16 +81,20 @@ inline void sub(const int32_t value1, const int32_t value2, int32_t* to, int32_t
 // Note: the input carry may > 1, after the summation process of three number (value1, value2, *carry),
 //      the maximum value of carry may be 2, when sum() >= 2 * DIG_BASE.
 inline void add2(const int32_t value1, const int32_t value2, int32_t* to, int32_t* carry) {
-    int32_t sum = value1 + value2 + *carry;
+    // NOTE: When three int32_t integers (the maximum value of each number is 10 ^ 9 - 1) are added, 
+    // because the maximum value of int32_t is 2147483647, the result may overflow, so it is 
+    // necessary to convert int32_t to int64_t.
+    int64_t sum = (int64_t) value1 + value2 + *carry;
     *carry = (sum >= DIG_BASE) ? 1 : 0;
     if (*carry) {
         sum -= DIG_BASE;
     }
-    if (sum > DIG_BASE) {
+    if (sum >= DIG_BASE) {
         sum -= DIG_BASE;
         ++(*carry);
     }
-    *to = sum;
+    // the value of sum must small than DIG_BASE here
+    *to = (int32_t) sum;
 }
 
 // to = value1 - value2 ƒ
@@ -498,6 +501,8 @@ int do_div_mod(
     const int32_t* buff1 = value1._buffer;
     const int32_t* buff2 = value2._buffer;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
     // removing all the leading zeros
     // process value2
     int32_t first_big_digit_length = (prec2 - 1) % DIG_PER_DEC1 + 1;
@@ -529,6 +534,7 @@ int do_div_mod(
     for (; *buff1 < powers10[--first_big_digit_length];) {
         --prec1;
     }
+#pragma GCC diagnostic pop
 
     // 比较两个数的整形部分，得到结果的intg。 如果被除数较小，intg=0.
     int32_t dintg = (prec1 - frac1) - (prec2 - frac2) + (*buff1 >= *buff2);
@@ -895,9 +901,10 @@ int DecimalValue::parse_from_str(const char* decimal_str, int32_t length) {
         *buff = value * powers10[DIG_PER_DEC1 - index_in_powers10];
     }
 
-    // Handle exponent
+    // TODO: we do not support decimal in scientific notation
     if ((frac_ptr + 1) < end && (*frac_ptr == 'e' || *frac_ptr == 'E')) {
-        int64_t exponent = strtoll(frac_ptr + 1, (char**) end, 10);
+        // return E_DEC_BAD_NUM;
+        int64_t exponent = strtoll(frac_ptr + 1, (char**) &end, 10);
         if (end != frac_ptr + 1) { // If at least one digit
             if (errno) { // system error number, it is thread local
                 set_to_zero();
@@ -1244,4 +1251,4 @@ int DecimalValue::round(DecimalValue *to, int scale, DecimalRoundMode mode) {
     return error;
 }
 
-} // end namespace palo
+} // end namespace doris

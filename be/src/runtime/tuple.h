@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_RUNTIME_TUPLE_H
-#define BDG_PALO_BE_RUNTIME_TUPLE_H
+#ifndef DORIS_BE_RUNTIME_TUPLE_H
+#define DORIS_BE_RUNTIME_TUPLE_H
 
 #include <cstring>
 #include "common/logging.h"
 #include "runtime/descriptors.h"
 #include "runtime/mem_pool.h"
 
-namespace palo {
+namespace doris {
 
 struct StringValue;
 class TupleDescriptor;
@@ -172,14 +169,15 @@ public:
         return reinterpret_cast<DecimalValue*>(reinterpret_cast<char*>(this) + offset);
     }
 
-    __int128* get_large_int_slot(int offset) {
+    DecimalV2Value* get_decimalv2_slot(int offset) {
         DCHECK(offset != -1);  // -1 offset indicates non-materialized slot
-        return reinterpret_cast<__int128*>(reinterpret_cast<char*>(this) + offset);
+        return reinterpret_cast<DecimalV2Value*>(reinterpret_cast<char*>(this) + offset);
     }
 
-    // For C++/IR interop, we need to be able to look up types by name.
-    static const char* _s_llvm_class_name;
+    void* get_data() { return this; }
 
+    std::string to_string(const TupleDescriptor& d) const;
+    static std::string to_string(const Tuple* t, const TupleDescriptor& d);
 private:
     void* _data;
 };

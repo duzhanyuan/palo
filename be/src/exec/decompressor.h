@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -23,12 +20,15 @@
 #include <zlib.h>
 #include <bzlib.h>
 #include <lz4/lz4frame.h>
+
+#ifdef DORIS_WITH_LZO
 #include <lzo/lzoconf.h>
 #include <lzo/lzo1x.h>
+#endif
 
 #include "common/status.h"
 
-namespace palo {
+namespace doris {
 
 enum CompressType {
     UNCOMPRESSED,
@@ -148,9 +148,10 @@ private:
 private:
     LZ4F_dctx* _dctx;
     size_t _expect_dec_buf_size;
-    const static unsigned PALO_LZ4F_VERSION;
+    const static unsigned DORIS_LZ4F_VERSION;
 };
 
+#ifdef DORIS_WITH_LZO
 class LzopDecompressor : public Decompressor {
 public:
     virtual ~LzopDecompressor();
@@ -258,5 +259,6 @@ private:
     const static uint64_t F_CRC32_D;
     const static uint64_t F_ADLER32_D;
 };
+#endif // DORIS_WITH_LZO 
 
 } // namespace

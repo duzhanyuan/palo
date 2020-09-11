@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_RUNTIME_PLAN_FRAGMENT_EXECUTOR_H
-#define BDG_PALO_BE_RUNTIME_PLAN_FRAGMENT_EXECUTOR_H
+#ifndef DORIS_BE_RUNTIME_PLAN_FRAGMENT_EXECUTOR_H
+#define DORIS_BE_RUNTIME_PLAN_FRAGMENT_EXECUTOR_H
 
 #include <vector>
 #include <boost/scoped_ptr.hpp>
@@ -27,9 +24,10 @@
 
 #include "common/status.h"
 #include "common/object_pool.h"
+#include "runtime/query_statistics.h"
 #include "runtime/runtime_state.h"
 
-namespace palo {
+namespace doris {
 
 class HdfsFsCache;
 class ExecNode;
@@ -39,7 +37,6 @@ class DataSink;
 class DataStreamMgr;
 class RuntimeProfile;
 class RuntimeState;
-class TRowBatch;
 class TPlanExecRequest;
 class TPlanFragment;
 class TPlanFragmentExecParams;
@@ -117,6 +114,11 @@ public:
     // in open()/get_next().
     void close();
 
+    // Abort this execution. Must be called if we skip running open().
+    // It will let DataSink node closed with error status, to avoid use resources which created in open() phase.
+    // DataSink node should distinguish Aborted status from other error status.
+    void set_abort();
+
     // Initiate cancellation. Must not be called until after prepare() returned.
     void cancel();
 
@@ -139,12 +141,20 @@ public:
     DataSink* get_sink() {
         return _sink.get();
     }
+
+    void report_profile_once() {
+        _stop_report_thread_cv.notify_one();
+    }
+
+    void set_is_report_on_cancel(bool val) {
+        _is_report_on_cancel = val;
+    }
+
 private:
     ExecEnv* _exec_env;  // not owned
     ExecNode* _plan;  // lives in _runtime_state->obj_pool()
     TUniqueId _query_id;
-    // MemTracker* _mem_tracker;
-    boost::scoped_ptr<MemTracker> _mem_tracker;
+    std::shared_ptr<MemTracker> _mem_tracker;
 
     // profile reporting-related
     report_status_callback _report_status_cb;
@@ -174,6 +184,10 @@ private:
 
     bool _is_report_success;
 
+    // If this is set to false, and '_is_report_success' is false as well,
+    // This executor will not report status to FE on being cancelled.
+    bool _is_report_on_cancel;
+
     // Overall execution status. Either ok() or set to the first error status that
     // was encountered.
     Status _status;
@@ -184,13 +198,14 @@ private:
     // 2. _status_lock
     boost::mutex _status_lock;
 
+    // note that RuntimeState should be constructed before and destructed after `_sink' and `_row_batch',
+    // therefore we declare it before `_sink' and `_row_batch'
+    boost::scoped_ptr<RuntimeState> _runtime_state;
     // Output sink for rows sent to this fragment. May not be set, in which case rows are
     // returned via get_next's row batch
     // Created in prepare (if required), owned by this object.
     boost::scoped_ptr<DataSink> _sink;
-    boost::scoped_ptr<RuntimeState> _runtime_state;
     boost::scoped_ptr<RowBatch> _row_batch;
-    boost::scoped_ptr<TRowBatch> _thrift_batch;
 
     // Number of rows returned by this fragment
     RuntimeProfile::Counter* _rows_produced_counter;
@@ -204,12 +219,18 @@ private:
     // of the execution.
     RuntimeProfile::Counter* _average_thread_tokens;
 
+    // It is shared with BufferControlBlock and will be called in two different 
+    // threads. But their calls are all at different time, there is no problem of 
+    // multithreaded access.
+    std::shared_ptr<QueryStatistics> _query_statistics;
+    bool _collect_query_statistics_with_every_batch;    
+
     ObjectPool* obj_pool() {
         return _runtime_state->obj_pool();
     }
 
     // typedef for TPlanFragmentExecParams.per_node_scan_ranges
-    typedef std::map<TPlanNodeId, std::vector<TScanRangeParams> > PerNodeScanRanges;
+    typedef std::map<TPlanNodeId, std::vector<TScanRangeParams>> PerNodeScanRanges;
 
     // Main loop of profile reporting thread.
     // Exits when notified on _done_cv.
@@ -226,14 +247,6 @@ private:
     // sends a final report.
     void update_status(const Status& status);
 
-    /// Optimizes the code-generated functions in runtime_state_->llvm_codegen().
-    /// Must be called between plan_->Prepare() and plan_->Open().
-    /// This is somewhat time consuming so we don't want it to do it in
-    /// PlanFragmentExecutor()::Prepare() to allow starting plan fragments more
-    /// quickly and in parallel (in a deep plan tree, the fragments are started
-    /// in level order).
-    void optimize_llvm_module();
-
     // Executes open() logic and returns resulting status. Does not set _status.
     // If this plan fragment has no sink, open_internal() does nothing.
     // If this plan fragment has a sink and open_internal() returns without an
@@ -249,13 +262,12 @@ private:
     // Idempotent.
     void stop_report_thread();
 
-    // Print stats about scan ranges for each volumeId in params to info log.
-    void print_volume_ids(const TPlanExecParams& params);
-    void print_volume_ids(const PerNodeScanRanges& per_node_scan_ranges);
-
     const DescriptorTbl& desc_tbl() {
         return _runtime_state->desc_tbl();
     }
+
+    void collect_query_statistics();
+
 };
 
 }

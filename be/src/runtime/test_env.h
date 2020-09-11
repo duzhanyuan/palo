@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_TEST_QUERY_RUNTIME_TEST_ENV_H
-#define BDG_PALO_BE_TEST_QUERY_RUNTIME_TEST_ENV_H
+#ifndef DORIS_BE_TEST_QUERY_RUNTIME_TEST_ENV_H
+#define DORIS_BE_TEST_QUERY_RUNTIME_TEST_ENV_H
 
 #include "runtime/buffered_block_mgr2.h"
 #include "runtime/disk_io_mgr.h"
 #include "runtime/exec_env.h"
 #include "runtime/runtime_state.h"
 
-namespace palo {
+namespace doris {
 
 // Helper testing class that creates an environment with a buffered-block-mgr similar
 // to the one Impala's runtime is using.
@@ -59,14 +56,11 @@ public:
     ExecEnv* exec_env() {
         return _exec_env.get();
     }
-    MemTracker* block_mgr_parent_tracker() {
-        return _block_mgr_parent_tracker.get();
+    std::shared_ptr<MemTracker> block_mgr_parent_tracker() {
+        return _block_mgr_parent_tracker;
     }
     MemTracker* io_mgr_tracker() {
         return _io_mgr_tracker.get();
-    }
-    MetricGroup* metrics() {
-        return _metrics.get();
     }
     TmpFileMgr* tmp_file_mgr() {
         return _tmp_file_mgr.get();
@@ -81,17 +75,15 @@ private:
     RuntimeState* create_runtime_state(int64_t query_id);
 
     // Global state for test environment.
-    static boost::scoped_ptr<MetricGroup> _s_static_metrics;
     boost::scoped_ptr<ExecEnv> _exec_env;
-    boost::scoped_ptr<MemTracker> _block_mgr_parent_tracker;
-    boost::scoped_ptr<MemTracker> _io_mgr_tracker;
-    boost::scoped_ptr<MetricGroup> _metrics;
+    std::shared_ptr<MemTracker> _block_mgr_parent_tracker;
+    std::shared_ptr<MemTracker> _io_mgr_tracker;
     boost::scoped_ptr<TmpFileMgr> _tmp_file_mgr;
 
     // Per-query states with associated block managers.
-    std::vector<boost::shared_ptr<RuntimeState> > _query_states;
+    std::vector<boost::shared_ptr<RuntimeState>> _query_states;
 };
 
-} // end namespace palo
+} // end namespace doris
 
-#endif // BDG_PALO_BE_TEST_QUERY_RUNTIME_TEST_ENV_H
+#endif // DORIS_BE_TEST_QUERY_RUNTIME_TEST_ENV_H

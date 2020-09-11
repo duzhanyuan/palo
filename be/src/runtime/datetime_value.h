@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -13,18 +15,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_RUNTIME_DATETIME_VALUE_H
-#define BDG_PALO_BE_RUNTIME_DATETIME_VALUE_H
+#ifndef DORIS_BE_RUNTIME_DATETIME_VALUE_H
+#define DORIS_BE_RUNTIME_DATETIME_VALUE_H
 
 #include <stdint.h>
 
-#include <iostream>
+#include <chrono>
 #include <cstddef>
+#include <iostream>
+#include <re2/re2.h>
 
+#include "cctz/civil_time.h"
+#include "cctz/time_zone.h"
 #include "udf/udf.h"
 #include "util/hash_util.hpp"
+#include "util/timezone_utils.h"
 
-namespace palo {
+namespace doris {
 
 enum TimeUnit {
     MICROSECOND,
@@ -234,7 +241,9 @@ public:
 
     // Convert this datetime value to string by the format string
     bool to_format_string(const char* format, int len, char* to) const;
-    int compute_format_len(const char* format, int len) const;
+
+    // compute the length of data format pattern
+    static int compute_format_len(const char* format, int len);
 
     // Convert this value to uint64_t
     // Will check its type
@@ -329,10 +338,16 @@ public:
 
     // Add interval 
     bool date_add_interval(const TimeInterval& interval, TimeUnit unit);
-
-    int unix_timestamp() const;
-
-    bool from_unixtime(int);
+    
+    //unix_timestamp is called with a timezone argument,
+    //it returns seconds of the value of date literal since '1970-01-01 00:00:00' UTC
+    bool unix_timestamp(int64_t* timestamp, const std::string& timezone) const;
+    bool unix_timestamp(int64_t* timestamp, const cctz::time_zone& ctz) const;
+    
+    //construct datetime_value from timestamp and timezone
+    //timestamp is an internal timestamp value representing seconds since '1970-01-01 00:00:00' UTC
+    bool from_unixtime(int64_t, const std::string& timezone);
+    bool from_unixtime(int64_t, const cctz::time_zone& ctz);
 
     bool operator==(const DateTimeValue& other) const {
         // NOTE: This is not same with MySQL.
@@ -393,12 +408,12 @@ public:
         return *this;
     }
 
-    void to_datetime_val(palo_udf::DateTimeVal* tv) const {
+    void to_datetime_val(doris_udf::DateTimeVal* tv) const {
         tv->packed_time = to_int64_datetime_packed();
         tv->type = _type;
     }
 
-    static DateTimeValue from_datetime_val(const palo_udf::DateTimeVal& tv) {
+    static DateTimeValue from_datetime_val(const doris_udf::DateTimeVal& tv) {
         DateTimeValue value;
         value.from_packed_time(tv.packed_time);
         if (tv.type == TIME_DATE) {
@@ -433,12 +448,19 @@ public:
     }
 
     int64_t second_diff(const DateTimeValue& rhs) const {
-        return unix_timestamp() - rhs.unix_timestamp();
+        int day_diff = daynr() - rhs.daynr();
+        int time_diff = (hour() * 3600 + minute() * 60 + second())
+            - (rhs.hour() * 3600 + rhs.minute() * 60 + rhs.second());
+        return day_diff * 3600 * 24 + time_diff;
+    }
+
+    int64_t time_part_diff(const DateTimeValue& rhs) const {
+        int time_diff = (hour() * 3600 + minute() * 60 + second())
+            - (rhs.hour() * 3600 + rhs.minute() * 60 + rhs.second());
+        return time_diff;
     }
 
     void set_type(int type);
-
-    static const char* _s_llvm_class_name;
 
 private:
     // Used to make sure sizeof DateTimeValue
@@ -534,6 +556,8 @@ private:
 
     static DateTimeValue _s_min_datetime_value;
     static DateTimeValue _s_max_datetime_value;
+    // RE2 obj is thread safe
+    static RE2 time_zone_offset_format_reg;
 };
 
 // only support DATE - DATE (no support DATETIME - DATETIME)
@@ -547,9 +571,9 @@ std::size_t hash_value(DateTimeValue const& value);
 
 namespace std {
     template<>
-    struct hash<palo::DateTimeValue> {
-        size_t operator()(const palo::DateTimeValue& v) const {
-            return palo::hash_value(v);
+    struct hash<doris::DateTimeValue> {
+        size_t operator()(const doris::DateTimeValue& v) const {
+            return doris::hash_value(v);
         }
     };
 }

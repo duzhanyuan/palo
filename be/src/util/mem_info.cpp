@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -27,14 +24,13 @@
 #include <sstream>
 #include <unistd.h>
 
-#include <boost/algorithm/string.hpp>
-#include <boost/lexical_cast.hpp>
+#include "gutil/strings/split.h"
 
-#include "util/debug_util.h"
 #include "util/pretty_printer.h"
 #include "util/string_parser.hpp"
+#include "util/cgroup_util.h"
 
-namespace palo {
+namespace doris {
 
 bool MemInfo::_s_initialized = false;
 int64_t MemInfo::_s_physical_mem = -1;
@@ -46,8 +42,7 @@ void MemInfo::init() {
 
     while (meminfo.good() && !meminfo.eof()) {
         getline(meminfo, line);
-        std::vector<std::string> fields;
-        boost::split(fields, line, boost::is_any_of(" "), boost::token_compress_on);
+        std::vector<std::string> fields = strings::Split(line, " ", strings::SkipWhitespace());
 
         // We expect lines such as, e.g., 'MemTotal: 16129508 kB'
         if (fields.size() < 3) {
@@ -70,6 +65,12 @@ void MemInfo::init() {
         break;
     }
 
+    int64_t cgroup_mem_limit = 0;
+    Status status = CGroupUtil::find_cgroup_mem_limit(&cgroup_mem_limit);
+    if (status.ok() && cgroup_mem_limit > 0) {
+        _s_physical_mem = std::min(_s_physical_mem, cgroup_mem_limit);
+    }
+
     if (meminfo.is_open()) {
         meminfo.close();
     }
@@ -86,9 +87,11 @@ void MemInfo::init() {
 
 std::string MemInfo::debug_string() {
     DCHECK(_s_initialized);
+    CGroupUtil util;
     std::stringstream stream;
     stream << "Mem Info: " << PrettyPrinter::print(_s_physical_mem, TUnit::BYTES)
            << std::endl;
+    stream << "CGroup Info: " << util.debug_string() << std::endl;
     return stream.str();
 }
 

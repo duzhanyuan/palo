@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -26,7 +23,7 @@
 
 using std::vector;
 
-namespace palo {
+namespace doris {
 
 bool BufferedTupleStream2::deep_copy(TupleRow* row) {
     if (_nullable_tuple) {
@@ -185,4 +182,4 @@ bool BufferedTupleStream2::copy_collections(const Tuple* tuple,
 }
 #endif
 
-} // end namespace palo
+} // end namespace doris

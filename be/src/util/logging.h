@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,13 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_COMMON_UTIL_LOGGING_H
-#define BDG_PALO_BE_SRC_COMMON_UTIL_LOGGING_H
+#ifndef DORIS_BE_SRC_COMMON_UTIL_LOGGING_H
+#define DORIS_BE_SRC_COMMON_UTIL_LOGGING_H
 
 #include <string>
 #include "common/logging.h"
+#include "gutil/walltime.h"
 
-namespace palo {
+namespace doris {
 
 // glog doesn't allow multiple invocations of InitGoogleLogging. This method conditionally
 // calls InitGoogleLogging only if it hasn't been called before.
@@ -34,6 +32,9 @@ bool init_glog(const char* basename, bool install_signal_handler = false);
 // flushed. May only be called once.
 void shutdown_logging();
 
+// Format a timestamp in the same format as used by GLog.
+std::string FormatTimestampForLog(MicrosecondsInt64 micros_since_epoch);
+
 }
 
-#endif // BDG_PALO_BE_SRC_COMMON_UTIL_LOGGING_H
+#endif // DORIS_BE_SRC_COMMON_UTIL_LOGGING_H

@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXEC_READ_WRITE_UTIL_H
-#define BDG_PALO_BE_SRC_QUERY_EXEC_READ_WRITE_UTIL_H
+#ifndef DORIS_BE_SRC_QUERY_EXEC_READ_WRITE_UTIL_H
+#define DORIS_BE_SRC_QUERY_EXEC_READ_WRITE_UTIL_H
 
 #include <boost/cstdint.hpp>
 #include <sstream>
 #include "common/logging.h"
 #include "common/status.h"
 
-namespace palo {
+namespace doris {
 
 #define RETURN_IF_FALSE(x) if (UNLIKELY(!(x))) return false
 
@@ -175,7 +172,7 @@ inline bool ReadWriteUtil::read_zlong(uint8_t** buf, int* buf_len, int64_t* val,
         DCHECK_LE(shift, 64);
 
         if (UNLIKELY(*buf_len < 1)) {
-            *status = Status("Insufficient buffer length");
+            *status = Status::InternalError("Insufficient buffer length");
             return false;
         }
 
@@ -197,7 +194,7 @@ inline bool ReadWriteUtil::read(uint8_t** buf, int* buf_len, T* val, Status* sta
     if (UNLIKELY(val_len > *buf_len)) {
         std::stringstream ss;
         ss << "Cannot read " << val_len << " bytes, buffer length is " << *buf_len;
-        *status = Status(ss.str());
+        *status = Status::InternalError(ss.str());
         return false;
     }
 
@@ -214,7 +211,7 @@ inline bool ReadWriteUtil::skip_bytes(uint8_t** buf, int* buf_len, int num_bytes
     if (UNLIKELY(num_bytes > *buf_len)) {
         std::stringstream ss;
         ss << "Cannot skip " << num_bytes << " bytes, buffer length is " << *buf_len;
-        *status = Status(ss.str());
+        *status = Status::InternalError(ss.str());
         return false;
     }
 

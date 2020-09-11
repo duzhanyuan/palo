@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_H
-#define BDG_PALO_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_H
+#ifndef DORIS_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_H
+#define DORIS_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_H
 
 #include <list>
 #include <vector>
@@ -38,11 +35,11 @@
 #include "common/status.h"
 #include "util/error_util.h"
 #include "util/internal_queue.h"
-#include "util/palo_metrics.h"
+#include "util/metrics.h"
 #include "util/runtime_profile.h"
 #include "runtime/mem_tracker.h"
 
-namespace palo {
+namespace doris {
 
 class MemTracker;
 
@@ -247,10 +244,9 @@ public:
         // Returns the offset within the scan range that this buffer starts at
         int64_t scan_range_offset() const { return _scan_range_offset; }
 
-        // Updates this buffer buffer to be owned by the new tracker. Consumption is
+        // Updates this buffer to be owned by the new tracker. Consumption is
         // release from the current tracker and added to the new one.
-        // void SetMemTracker(MemTracker* tracker);
-        void set_mem_tracker(MemTracker* mem_tracker);
+        void set_mem_tracker(std::shared_ptr<MemTracker> tracker);
 
         // Returns the buffer to the IoMgr. This must be called for every buffer
         // returned by get_next()/read() that did not return an error. This is non-blocking.
@@ -271,8 +267,7 @@ public:
         RequestContext* _reader;
 
         // The current tracker this buffer is associated with.
-        // MemTracker* _mem_tracker;
-        MemTracker* _mem_tracker;
+        std::shared_ptr<MemTracker> _mem_tracker;
 
         // Scan range that this buffer is for.
         ScanRange* _scan_range;
@@ -362,7 +357,7 @@ public:
 
         // Returns the next buffer for this scan range. buffer is an output parameter.
         // This function blocks until a buffer is ready or an error occurred. If this is
-        // called when all buffers have been returned, *buffer is set to NULL and Status::OK
+        // called when all buffers have been returned, *buffer is set to NULL and Status::OK()
         // is returned.
         // Only one thread can be in get_next() at any time.
         Status get_next(BufferDescriptor** buffer);
@@ -510,7 +505,7 @@ public:
 
         // This callback is invoked on each WriteRange after the write is complete or the
         // context is cancelled. The status returned by the callback parameter indicates
-        // if the write was successful (i.e. Status::OK), if there was an error
+        // if the write was successful (i.e. Status::OK()), if there was an error
         // TStatusCode::RUNTIME_ERROR) or if the context was cancelled
         // (TStatusCode::CANCELLED). The callback is only invoked if this WriteRange was
         // successfully added (i.e. add_write_range() succeeded). No locks are held while
@@ -551,8 +546,7 @@ public:
     ~DiskIoMgr();
 
     // Initialize the IoMgr. Must be called once before any of the other APIs.
-    // Status init(MemTracker* process_mem_tracker);
-    Status init(MemTracker* process_mem_tracker);
+    Status init(const std::shared_ptr<MemTracker>& process_mem_tracker);
 
     // Allocates tracking structure for a request context.
     // Register a new request context which is returned in *request_context.
@@ -562,10 +556,8 @@ public:
     //    used for this reader will be tracked by this. If the limit is exceeded
     //    the reader will be cancelled and MEM_LIMIT_EXCEEDED will be returned via
     //    get_next().
-    // Status register_context(RequestContext** request_context,
-    //         MemTracker* reader_mem_tracker = NULL);
     Status register_context(RequestContext** request_context,
-            MemTracker* reader_mem_tracker = NULL);
+                            std::shared_ptr<MemTracker> reader_mem_tracker = std::shared_ptr<MemTracker>());
 
     // Unregisters context from the disk IoMgr. This must be called for every
     // register_context() regardless of cancellation and must be called in the
@@ -707,8 +699,7 @@ private:
     ObjectPool _pool;
 
     // Process memory tracker; needed to account for io buffers.
-    // MemTracker* _process_mem_tracker;
-    MemTracker* _process_mem_tracker;
+    std::shared_ptr<MemTracker> _process_mem_tracker;
 
     // Number of worker(read) threads per disk. Also the max depth of queued
     // work to the disk.
@@ -757,7 +748,7 @@ private:
     //  _free_buffers[10] => list of free buffers with size 1 MB
     //  _free_buffers[13] => list of free buffers with size 8 MB
     //  _free_buffers[n]  => list of free buffers with size 2^n * 1024 B
-    std::vector<std::list<char*> > _free_buffers;
+    std::vector<std::list<char*>> _free_buffers;
 
     // List of free buffer desc objects that can be handed out to clients
     std::list<BufferDescriptor*> _free_buffer_descs;
@@ -860,7 +851,7 @@ private:
             ScanRange* range);
 };
 
-} // end namespace palo
+} // end namespace doris
 
-#endif // BDG_PALO_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_H
+#endif // DORIS_BE_SRC_QUERY_RUNTIME_DISK_IO_MGR_H
 

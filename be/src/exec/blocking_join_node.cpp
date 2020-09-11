@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -25,13 +22,10 @@
 #include "exprs/expr.h"
 #include "runtime/row_batch.h"
 #include "runtime/runtime_state.h"
-#include "util/debug_util.h"
 #include "util/runtime_profile.h"
 #include "gen_cpp/PlanNodes_types.h"
 
-namespace palo {
-
-const char* BlockingJoinNode::LLVM_CLASS_NAME = "class.palo::BlockingJoinNode";
+namespace doris {
 
 BlockingJoinNode::BlockingJoinNode(const std::string& node_name,
                                    const TJoinOp::type join_op,
@@ -43,8 +37,8 @@ BlockingJoinNode::BlockingJoinNode(const std::string& node_name,
       _join_op(join_op) {
 }
 
-Status BlockingJoinNode::init(const TPlanNode& tnode) {
-    return ExecNode::init(tnode);
+Status BlockingJoinNode::init(const TPlanNode& tnode, RuntimeState* state) {
+    return ExecNode::init(tnode, state);
 }
 
 BlockingJoinNode::~BlockingJoinNode() {
@@ -56,7 +50,7 @@ Status BlockingJoinNode::prepare(RuntimeState* state) {
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     RETURN_IF_ERROR(ExecNode::prepare(state));
 
-    _build_pool.reset(new MemPool(mem_tracker()));
+    _build_pool.reset(new MemPool(mem_tracker().get()));
     _build_timer = ADD_TIMER(runtime_profile(), "BuildTime");
     _left_child_timer = ADD_TIMER(runtime_profile(), "LeftChildTime");
     _build_row_counter = ADD_COUNTER(runtime_profile(), "BuildRows", TUnit::UNIT);
@@ -80,16 +74,16 @@ Status BlockingJoinNode::prepare(RuntimeState* state) {
     _probe_tuple_row_size = num_left_tuples * sizeof(Tuple*);
     _build_tuple_row_size = num_build_tuples * sizeof(Tuple*);
 
-    _left_batch.reset(new RowBatch(child(0)->row_desc(), state->batch_size(), mem_tracker()));
-    return Status::OK;
+    _left_batch.reset(new RowBatch(child(0)->row_desc(), state->batch_size(), mem_tracker().get()));
+    return Status::OK();
 }
 
 Status BlockingJoinNode::close(RuntimeState* state) {
     // TODO(zhaochun): avoid double close
-    // if (is_closed()) return Status::OK;
+    // if (is_closed()) return Status::OK();
     _left_batch.reset();
     ExecNode::close(state);
-    return Status::OK;
+    return Status::OK();
 }
 
 void BlockingJoinNode::build_side_thread(RuntimeState* state, boost::promise<Status>* status) {
@@ -167,7 +161,7 @@ Status BlockingJoinNode::open(RuntimeState* state) {
         }
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 void BlockingJoinNode::debug_string(int indentation_level, std::stringstream* out) const {
@@ -194,9 +188,9 @@ std::string BlockingJoinNode::get_left_child_row_string(TupleRow* row) {
             std::find(_build_tuple_idx_ptr, _build_tuple_idx_ptr + _build_tuple_size, i);
 
         if (is_build_tuple != _build_tuple_idx_ptr + _build_tuple_size) {
-            out << print_tuple(NULL, *row_desc().tuple_descriptors()[i]);
+            out << Tuple::to_string(NULL, *row_desc().tuple_descriptors()[i]);
         } else {
-            out << print_tuple(row->get_tuple(i), *row_desc().tuple_descriptors()[i]);
+            out << Tuple::to_string(row->get_tuple(i), *row_desc().tuple_descriptors()[i]);
         }
     }
 

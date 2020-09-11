@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -25,8 +22,9 @@
 #include "runtime/string_value.hpp"
 #include "runtime/tuple.h"
 #include "olap/utils.h"
+#include "util/types.h"
 
-namespace palo {
+namespace doris {
 
 const int RawValue::ASCII_PRECISION = 16; // print 16 digits for double/float
 
@@ -84,6 +82,10 @@ void RawValue::print_value_as_bytes(const void* value, const TypeDescriptor& typ
 
     case TYPE_DECIMAL:
         stream->write(chars, sizeof(DecimalValue));
+        break;
+
+    case TYPE_DECIMALV2:
+        stream->write(chars, sizeof(DecimalV2Value));
         break;
 
     case TYPE_LARGEINT:
@@ -163,8 +165,12 @@ void RawValue::print_value(const void* value, const TypeDescriptor& type, int sc
         *stream << *reinterpret_cast<const DecimalValue*>(value);
         break;
 
+    case TYPE_DECIMALV2:
+        *stream << reinterpret_cast<const PackedInt128*>(value)->value;
+        break;
+
     case TYPE_LARGEINT:
-        *stream << *reinterpret_cast<const __int128*>(value);
+        *stream << reinterpret_cast<const PackedInt128*>(value)->value;
         break;
 
     default:
@@ -198,16 +204,22 @@ void RawValue::print_value(const void* value, const TypeDescriptor& type, int sc
 
     case TYPE_CHAR:
     case TYPE_VARCHAR:
+    case TYPE_OBJECT:
     case TYPE_HLL: {
         string_val = reinterpret_cast<const StringValue*>(value);
         std::stringstream ss;
         ss << "ptr:" << (void*)string_val->ptr << " len" << string_val->len;
-        // tmp.assign(static_cast<char*>(string_val->ptr), string_val->len);
         tmp = ss.str();
+        if (string_val->len <= 1000) {
+            tmp.assign(static_cast<char*>(string_val->ptr), string_val->len);
+        }
         str->swap(tmp);
         return;
     }
-
+    case TYPE_NULL: {
+        *str = "NULL";
+        return;
+    }
     default:
         print_value(value, type, scale, &out);
     }
@@ -247,7 +259,7 @@ void RawValue::write(const void* value, void* dst, const TypeDescriptor& type, M
     }
 
     case TYPE_LARGEINT: {
-        *reinterpret_cast<__int128*>(dst) = *reinterpret_cast<const __int128*>(value);
+        *reinterpret_cast<PackedInt128*>(dst) = *reinterpret_cast<const PackedInt128*>(value);
         break;
     }
 
@@ -256,6 +268,7 @@ void RawValue::write(const void* value, void* dst, const TypeDescriptor& type, M
         break;
     }
 
+    case TYPE_TIME:
     case TYPE_DOUBLE: {
         *reinterpret_cast<double*>(dst) = *reinterpret_cast<const double*>(value);
         break;
@@ -272,6 +285,11 @@ void RawValue::write(const void* value, void* dst, const TypeDescriptor& type, M
                 *reinterpret_cast<const DecimalValue*>(value);
         break;
 
+    case TYPE_DECIMALV2:
+        *reinterpret_cast<PackedInt128*>(dst) = *reinterpret_cast<const PackedInt128*>(value);
+        break;
+
+    case TYPE_OBJECT:
     case TYPE_HLL:
     case TYPE_VARCHAR:
     case TYPE_CHAR: {
@@ -314,7 +332,7 @@ void RawValue::write(const void* value, const TypeDescriptor& type, void* dst, u
             *reinterpret_cast<int64_t*>(dst) = *reinterpret_cast<const int64_t*>(value);
             break;
         case TYPE_LARGEINT:
-            *reinterpret_cast<__int128*>(dst) = *reinterpret_cast<const __int128*>(value);
+            *reinterpret_cast<PackedInt128*>(dst) = *reinterpret_cast<const PackedInt128*>(value);
             break;
         case TYPE_FLOAT:
             *reinterpret_cast<float*>(dst) = *reinterpret_cast<const float*>(value);
@@ -341,6 +359,11 @@ void RawValue::write(const void* value, const TypeDescriptor& type, void* dst, u
         case TYPE_DECIMAL:
             *reinterpret_cast<DecimalValue*>(dst) = *reinterpret_cast<const DecimalValue*>(value);
             break;
+
+        case TYPE_DECIMALV2:
+            *reinterpret_cast<PackedInt128*>(dst) = *reinterpret_cast<const PackedInt128*>(value);
+            break;
+
         default:
             DCHECK(false) << "RawValue::write(): bad type: " << type.debug_string();
     }

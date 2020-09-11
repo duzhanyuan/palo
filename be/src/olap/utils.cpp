@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -20,230 +22,43 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#include <stdlib.h>
+#include <unistd.h>
 #include <string>
+#include <cstring>
+#include <cstdint>
 #include <vector>
 
 #include <boost/filesystem.hpp>
 #include <boost/regex.hpp>
 #include <errno.h>
 #include <lz4/lz4.h>
+#include "util/file_utils.h"
+#include "olap/file_helper.h"
+
+#ifdef DORIS_WITH_LZO
 #include <lzo/lzo1c.h>
 #include <lzo/lzo1x.h>
+#endif
+
 #include <stdarg.h>
 
 #include "common/logging.h"
+#include "common/status.h"
+#include "env/env.h"
+#include "gutil/strings/substitute.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
+#include "util/errno.h"
+#include "util/mutex.h"
+#include "util/string_parser.hpp"
 
 using std::string;
 using std::set;
 using std::vector;
+using std::unique_ptr;
 
-#define PTHREAD_MUTEX_INIT_WITH_LOG(lockptr, param) \
-    do {\
-        int lock_ret = 0;\
-        if (0 != (lock_ret = pthread_mutex_init(lockptr, param))) {\
-            OLAP_LOG_FATAL("fail to init mutex. [lock_ret=%d err='%m']", lock_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_MUTEX_DESTROY_WITH_LOG(lockptr) \
-    do {\
-        int lock_ret = 0;\
-        if (0 != (lock_ret = pthread_mutex_destroy(lockptr))) {\
-            OLAP_LOG_FATAL("fail to destroy mutex. [lock_ret=%d err='%m']", lock_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_MUTEX_LOCK_WITH_LOG(lockptr) \
-    do {\
-        int lock_ret = 0;\
-        if (0 != (lock_ret = pthread_mutex_lock(lockptr))) {\
-            OLAP_LOG_FATAL("fail to lock mutex. [lock_ret=%d err='%m']", lock_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_MUTEX_UNLOCK_WITH_LOG(lockptr) \
-    do {\
-        int lock_ret = 0;\
-        if (0 != (lock_ret = pthread_mutex_unlock(lockptr))) {\
-            OLAP_LOG_FATAL("fail to unlock mutex. [lock_ret=%d err='%m']", lock_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_RWLOCK_INIT_WITH_LOG(lockptr, param) \
-    do {\
-        int lock_ret = 0;\
-        if (0 != (lock_ret = pthread_rwlock_init(lockptr, param))) {\
-            OLAP_LOG_FATAL("fail to init rwlock. [lock_ret=%d err='%m']", lock_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_RWLOCK_DESTROY_WITH_LOG(lockptr) \
-    do {\
-        int lock_ret = 0;\
-        if (0 != (lock_ret = pthread_rwlock_destroy(lockptr))) {\
-            OLAP_LOG_FATAL("fail to destroy rwlock. [lock_ret=%d err='%m']", lock_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_RWLOCK_RDLOCK_WITH_LOG(lockptr) \
-    do {\
-        int lock_ret = 0;\
-        if (0 != (lock_ret = pthread_rwlock_rdlock(lockptr))) {\
-            OLAP_LOG_FATAL("fail to lock reader lock. [lock_ret=%d err='%m']", lock_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_RWLOCK_WRLOCK_WITH_LOG(lockptr) \
-    do {\
-        int lock_ret = 0;\
-        if (0 != (lock_ret = pthread_rwlock_wrlock(lockptr))) {\
-            OLAP_LOG_FATAL("fail to lock writer lock. [lock_ret=%d err='%m']", lock_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_RWLOCK_UNLOCK_WITH_LOG(lockptr) \
-    do {\
-        int lock_ret = 0;\
-        if (0 != (lock_ret = pthread_rwlock_unlock(lockptr))) {\
-            OLAP_LOG_FATAL("fail to unlock rwlock. [lock_ret=%d err='%m']", lock_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_COND_INIT_WITH_LOG(condptr, param) \
-    do {\
-        int cond_ret = 0;\
-        if (0 != (cond_ret = pthread_cond_init(condptr, param))) {\
-            OLAP_LOG_FATAL("fail to init cond. [cond_ret=%d err='%m']", cond_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_COND_DESTROY_WITH_LOG(condptr) \
-    do {\
-        int cond_ret = 0;\
-        if (0 != (cond_ret = pthread_cond_destroy(condptr))) {\
-            OLAP_LOG_FATAL("fail to destroy cond. [cond_ret=%d err='%m']", cond_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_COND_WAIT_WITH_LOG(condptr, lockptr) \
-    do {\
-        int cond_ret = 0;\
-        if (0 != (cond_ret = pthread_cond_wait(condptr, lockptr))) {\
-            OLAP_LOG_FATAL("fail to wait cond. [cond_ret=%d err='%m']", cond_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_COND_TIMEWAIT_WITH_LOG(condptr, lockptr, seconds) \
-    do {\
-        struct timeval now;\
-        struct timespec outtime = {0, 0};\
-        gettimeofday(&now, NULL);\
-        outtime.tv_sec = now.tv_sec + seconds;\
-        int cond_ret = 0;\
-        cond_ret = pthread_cond_timedwait(condptr, lockptr, &outtime);\
-        if (0 != cond_ret && ETIMEDOUT != cond_ret) {\
-            OLAP_LOG_FATAL("fail to timewait cond. "\
-                           "[cond_ret=%d err='%m' outtime.tv_sec=%d outtime.tv_nsec=%ld]",\
-                           cond_ret, outtime.tv_sec, outtime.tv_nsec);  \
-        }\
-    } while (0)
-
-#define PTHREAD_COND_SIGNAL_WITH_LOG(condptr) \
-    do {\
-        int cond_ret = 0;\
-        if (0 != (cond_ret = pthread_cond_signal(condptr))) {\
-            OLAP_LOG_FATAL("fail to signal cond. [cond_ret=%d err='%m']", cond_ret);\
-        }\
-    } while (0)
-
-#define PTHREAD_COND_BROADCAST_WITH_LOG(condptr) \
-    do {\
-        int cond_ret = 0;\
-        if (0 != (cond_ret = pthread_cond_broadcast(condptr))) {\
-            OLAP_LOG_FATAL("fail to broadcast cond. [cond_ret=%d err='%m']", cond_ret);\
-        }\
-    } while (0)
-
-namespace palo {
-__thread char OLAPNoticeLog::_buf[BUF_SIZE]; // buffer instance
-__thread int OLAPNoticeLog::_len = 0;        // len instance
-
-void OLAPNoticeLog::push(const char *key, const char *fmt, ...) {
-    int size_left = BUF_SIZE - _len;
-
-    va_list args;
-    va_start(args, fmt);
-
-    int len = snprintf(_buf + _len, size_left, " %s:", key);
-    _len = len >= size_left ? BUF_SIZE - 1 : _len + len;
-    if (len < size_left) {
-        size_left = BUF_SIZE - _len;
-        len = vsnprintf(_buf + _len, size_left, fmt, args);
-
-        //如果len>=BUF_SIZE, 说明有截断，但返回的长度是期望的长度
-        _len = len >= size_left ? BUF_SIZE - 1 : _len + len;
-    }
-
-    va_end(args);
-}
-
-void OLAPNoticeLog::log(const char *msg) {
-    // do nothing
-}
-
-__thread uint64_t OLAPNoticeInfo::_seek_count = 0;
-__thread uint64_t OLAPNoticeInfo::_seek_time_us = 0;
-__thread uint64_t OLAPNoticeInfo::_scan_rows = 0;
-__thread uint64_t OLAPNoticeInfo::_filter_rows = 0;
-
-void OLAPNoticeInfo::add_seek_count() {
-    ++_seek_count;
-}
-
-void OLAPNoticeInfo::add_scan_rows(uint64_t rows) {
-    _scan_rows += rows;
-}
-
-void OLAPNoticeInfo::add_filter_rows(uint64_t rows) {
-    _filter_rows += rows;
-}
-
-void OLAPNoticeInfo::add_seek_time_us(uint64_t time_us) {
-    _seek_time_us += time_us;
-}
-
-uint64_t OLAPNoticeInfo::seek_count() {
-    return _seek_count;
-}
-
-uint64_t OLAPNoticeInfo::seek_time_us() {
-    return _seek_time_us;
-}
-
-uint64_t OLAPNoticeInfo::avg_seek_time_us() {
-    if (0 == _seek_count) {
-        return 0;
-    }
-
-    return _seek_time_us / _seek_count;
-}
-
-uint64_t OLAPNoticeInfo::scan_rows() {
-    return _scan_rows;
-}
-
-uint64_t OLAPNoticeInfo::filter_rows() {
-    return _filter_rows;
-}
-
-void OLAPNoticeInfo::clear() {
-    _seek_count = 0;
-    _seek_time_us = 0;
-    _scan_rows = 0;
-    _filter_rows = 0;
-}
+namespace doris {
 
 OLAPStatus olap_compress(const char* src_buf,
                      size_t src_len,
@@ -262,6 +77,8 @@ OLAPStatus olap_compress(const char* src_buf,
 
     *written_len = dest_len;
     switch (compression_type) {
+
+#ifdef DORIS_WITH_LZO
     case OLAP_COMP_TRANSPORT: {
         // A small buffer(hundreds of bytes) for LZO1X
         unsigned char mem[LZO1X_1_MEM_COMPRESS];
@@ -280,9 +97,9 @@ OLAPStatus olap_compress(const char* src_buf,
             
             return OLAP_ERR_COMPRESS_ERROR;
         } else if (*written_len > dest_len) {
-            OLAP_LOG_DEBUG("buffer overflow when compressing. [dest_len=%lu written_len=%lu]",
-                             dest_len,
-                             *written_len);
+            VLOG(3) << "buffer overflow when compressing. "
+                    << "dest_len=" << dest_len
+                    << ", written_len=" << *written_len;
             
             return OLAP_ERR_BUFFER_OVERFLOW;
         }
@@ -306,26 +123,25 @@ OLAPStatus olap_compress(const char* src_buf,
             
             return OLAP_ERR_COMPRESS_ERROR;
         } else if (*written_len > dest_len) {
-            OLAP_LOG_DEBUG("buffer overflow when compressing. [dest_len=%lu written_len=%lu]",
-                             dest_len,
-                             *written_len);
+            VLOG(3) << "buffer overflow when compressing. "
+                    << ", dest_len=" << dest_len
+                    << ", written_len=" << *written_len;
             
             return OLAP_ERR_BUFFER_OVERFLOW;
         }
         break;
     }
+#endif
+
     case OLAP_COMP_LZ4: {
         // int lz4_res = LZ4_compress_limitedOutput(src_buf, dest_buf, src_len, dest_len);
         int lz4_res = LZ4_compress_default(src_buf, dest_buf, src_len, dest_len);
         *written_len = lz4_res;
         if (0 == lz4_res) {
-            OLAP_LOG_DEBUG("compress failed."
-                             "[src_len=%lu; dest_len=%lu; written_len=%lu; lz4_res=%d]",
-                             src_len,
-                             dest_len,
-                             *written_len,
-                             lz4_res);
-            
+            VLOG(10) << "compress failed. src_len=" << src_len
+                    << ", dest_len=" << dest_len
+                    << ", written_len=" << *written_len
+                    << ", lz4_res=" << lz4_res;
             return OLAP_ERR_BUFFER_OVERFLOW;
         }
         break;
@@ -354,6 +170,8 @@ OLAPStatus olap_decompress(const char* src_buf,
 
     *written_len = dest_len;
     switch (compression_type) {
+
+#ifdef DORIS_WITH_LZO
     case OLAP_COMP_TRANSPORT: {
         int lzo_res = lzo1x_decompress_safe(reinterpret_cast<const lzo_byte*>(src_buf),
                                             src_len,
@@ -402,6 +220,8 @@ OLAPStatus olap_decompress(const char* src_buf,
         }
         break;
     }
+#endif
+
     case OLAP_COMP_LZ4: {
         int lz4_res = LZ4_decompress_safe(src_buf, dest_buf, src_len, dest_len);
         *written_len = lz4_res;
@@ -418,6 +238,7 @@ OLAPStatus olap_decompress(const char* src_buf,
         break;
     }
     default: 
+        LOG(FATAL) << "unknown compress kind. kind=" << compression_type;
         break;
     }
     return OLAP_SUCCESS;
@@ -994,12 +815,15 @@ unsigned int crc32c_lut(char const * b, unsigned int off, unsigned int len, unsi
 }
 
 uint32_t olap_crc32(uint32_t crc32, const char* buf, size_t len) {
-    static int sse4_flag = check_sse4_2();
-    if (OLAP_LIKELY(1 == sse4_flag)) {
+#if defined(__i386) || defined(__x86_64__)
+    if (OLAP_LIKELY(CpuInfo::is_supported(CpuInfo::SSE4_2))) {
         return baidu_crc32_qw(buf, crc32, len);
     } else {
         return crc32c_lut(buf, 0, len, crc32);
     }
+#else
+    return crc32c_lut(buf, 0, len, crc32);
+#endif
 }
 
 OLAPStatus gen_timestamp_string(string* out_string) {
@@ -1044,7 +868,7 @@ OLAPStatus move_to_trash(const boost::filesystem::path& schema_hash_root,
 
     // 2. generate new file path
     static uint64_t delete_counter = 0; // a global counter to avoid file name duplication.
-    static MutexLock lock; // lock for delete_counter
+    static Mutex lock; // lock for delete_counter
     std::stringstream new_file_dir_stream;
     lock.lock();
     // when file_path points to a schema_path, we need to save tablet info in trash_path,
@@ -1058,15 +882,14 @@ OLAPStatus move_to_trash(const boost::filesystem::path& schema_hash_root,
     string new_file_dir = new_file_dir_stream.str();
     string new_file_path = new_file_dir + "/" + old_file_name;
     // create target dir, or the rename() function will fail.
-    if (!check_dir_existed(new_file_dir) && create_dirs(new_file_dir) != OLAP_SUCCESS) {
+    if (!FileUtils::check_exist(new_file_dir) && !FileUtils::create_dir(new_file_dir).ok()) {
         OLAP_LOG_WARNING("delete file failed. due to mkdir failed. [file=%s new_dir=%s]",
                 old_file_path.c_str(), new_file_dir.c_str());
         return OLAP_ERR_OS_ERROR;
     }
 
     // 3. remove file to trash
-    OLAP_LOG_DEBUG("move file to trash. [%s -> %s]",
-            old_file_path.c_str(), new_file_path.c_str());
+    VLOG(3) << "move file to trash. " << old_file_path << " -> " << new_file_path;
     if (rename(old_file_path.c_str(), new_file_path.c_str()) < 0) {
         OLAP_LOG_WARNING("move file to trash failed. [file=%s target='%s' err='%m']",
                 old_file_path.c_str(), new_file_path.c_str());
@@ -1076,120 +899,19 @@ OLAPStatus move_to_trash(const boost::filesystem::path& schema_hash_root,
     // 4. check parent dir of source file, delete it when empty
     string source_parent_dir = schema_hash_root.parent_path().string(); // tablet_id level
     std::set<std::string> sub_dirs, sub_files;
-    if (dir_walk(source_parent_dir, &sub_dirs, &sub_files) != OLAP_SUCCESS) {
-        OLAP_LOG_INFO("access dir failed. [dir=%s]", source_parent_dir.c_str());
-        // This error is nothing serious. so we still return success.
-        return OLAP_SUCCESS;
-    }
-    if (sub_files.empty() && sub_files.empty()) {
-        OLAP_LOG_INFO("remove empty dir %s", source_parent_dir.c_str());
+
+    RETURN_WITH_WARN_IF_ERROR(
+            FileUtils::list_dirs_files(source_parent_dir, &sub_dirs, &sub_files, Env::Default()),
+            OLAP_SUCCESS,
+            "access dir failed. [dir=" + source_parent_dir);
+    
+    if (sub_dirs.empty() && sub_files.empty()) {
+        LOG(INFO) << "remove empty dir " << source_parent_dir;
         // no need to exam return status
-        remove_dir(source_parent_dir);
+        Env::Default()->delete_dir(source_parent_dir);
     }
 
     return OLAP_SUCCESS;
-}
-
-MutexLock::MutexLock() {
-    PTHREAD_MUTEX_INIT_WITH_LOG(&_lock, NULL);
-}
-
-MutexLock::~MutexLock() {
-    PTHREAD_MUTEX_DESTROY_WITH_LOG(&_lock);
-}
-
-OLAPStatus MutexLock::lock() {
-    PTHREAD_MUTEX_LOCK_WITH_LOG(&_lock);
-    return OLAP_SUCCESS;
-}
-
-OLAPStatus MutexLock::trylock() {
-    if (0 != pthread_mutex_trylock(&_lock)) {
-        OLAP_LOG_DEBUG("failed to got the mutex lock. [err='%m']");
-        return OLAP_ERR_RWLOCK_ERROR;
-    }
-
-    return OLAP_SUCCESS;
-}
-
-OLAPStatus MutexLock::unlock() {
-    PTHREAD_MUTEX_UNLOCK_WITH_LOG(&_lock);
-    return OLAP_SUCCESS;
-}
-
-RWLock::RWLock() {
-    PTHREAD_RWLOCK_INIT_WITH_LOG(&_lock, NULL);
-}
-
-RWLock::~RWLock() {
-    PTHREAD_RWLOCK_DESTROY_WITH_LOG(&_lock);
-}
-
-OLAPStatus RWLock::rdlock() {
-    PTHREAD_RWLOCK_RDLOCK_WITH_LOG(&_lock);
-    return OLAP_SUCCESS;
-}
-
-OLAPStatus RWLock::tryrdlock() {
-    if (0 != pthread_rwlock_tryrdlock(&_lock)) {
-        OLAP_LOG_DEBUG("failed to got the rwlock rdlock. [err='%m']");
-        return OLAP_ERR_RWLOCK_ERROR;
-    }
-
-    return OLAP_SUCCESS;
-}
-
-OLAPStatus RWLock::trywrlock() {
-    if (0 != pthread_rwlock_trywrlock(&_lock)) {
-        OLAP_LOG_DEBUG("failed to got the rwlock rdlock. [err='%m']");
-        return OLAP_ERR_RWLOCK_ERROR;
-    }
-
-    return OLAP_SUCCESS;
-}
-
-OLAPStatus RWLock::wrlock() {
-    PTHREAD_RWLOCK_WRLOCK_WITH_LOG(&_lock);
-    return OLAP_SUCCESS;
-}
-
-OLAPStatus RWLock::unlock() {
-    PTHREAD_RWLOCK_UNLOCK_WITH_LOG(&_lock);
-    return OLAP_SUCCESS;
-}
-
-Condition::Condition(MutexLock& mutex) : _mutex(mutex) {
-    PTHREAD_COND_INIT_WITH_LOG(&_cond, NULL);
-}
-
-Condition::~Condition() {
-    PTHREAD_COND_DESTROY_WITH_LOG(&_cond);
-}
-
-void Condition::wait() {
-    PTHREAD_COND_WAIT_WITH_LOG(&_cond, _mutex.getlock());
-}
-
-void Condition::wait_for_seconds(uint32_t seconds) {
-    struct timeval now;
-    struct timespec outtime = {0, 0};
-    gettimeofday(&now, NULL);
-    outtime.tv_sec = now.tv_sec + seconds;
-    int cond_ret = 0;
-    cond_ret = pthread_cond_timedwait(&_cond, _mutex.getlock(), &outtime);
-    if (0 != cond_ret && ETIMEDOUT != cond_ret) {
-        OLAP_LOG_FATAL("fail to timewait cond. "
-                       "[cond_ret=%d err='%m' outtime.tv_sec=%d outtime.tv_nsec=%ld]",
-                       cond_ret, outtime.tv_sec, outtime.tv_nsec); 
-    }
-}
-
-void Condition::notify() {
-    PTHREAD_COND_SIGNAL_WITH_LOG(&_cond);
-}
-
-void Condition::notify_all() {
-    PTHREAD_COND_BROADCAST_WITH_LOG(&_cond);
 }
 
 int operator-(const BinarySearchIterator& left, const BinarySearchIterator& right) {
@@ -1204,14 +926,18 @@ OLAPStatus copy_file(const string& src, const string& dest) {
 
     src_fd = ::open(src.c_str(), O_RDONLY);
     if (src_fd < 0) {
-        OLAP_LOG_WARNING("failed to open file. [err=%m, file_name=%s]", src.c_str());
+        char errmsg[64];
+        LOG(WARNING) << "failed to open file. [err='" << strerror_r(errno, errmsg, 64) 
+                     << "' file_name=" << src << "]";
         res = OLAP_ERR_FILE_NOT_EXIST;
         goto COPY_EXIT;
     }
 
     dest_fd = ::open(dest.c_str(), O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
     if (dest_fd < 0) {
-        OLAP_LOG_WARNING("failed to open file to write. [err=%m, file_name=%s]", dest.c_str());
+        char errmsg[64];
+        LOG(WARNING) << "failed to open file to write. [err='" << strerror_r(errno, errmsg, 64)
+                     << "' file_name=" << dest << "]";
         res = OLAP_ERR_FILE_NOT_EXIST;
         goto COPY_EXIT;
     }
@@ -1250,69 +976,96 @@ COPY_EXIT:
         ::close(dest_fd);
     }
 
-    OLAP_LOG_TRACE("copy file success. [src=%s dest=%s]", src.c_str(), dest.c_str());
+    VLOG(3) << "copy file success. [src=" << src << " dest=" << dest << "]";
     
     return res;
 }
-
-bool check_dir_existed(const string& path) {
-    boost::filesystem::path p(path.c_str());
-
-    try {
-        if (boost::filesystem::exists(p)) {
-            OLAP_LOG_TRACE("dir already existed. [path='%s']", path.c_str());
-            return true;
-        } else {
-            OLAP_LOG_TRACE("dir does not existed. [path='%s']", path.c_str());
-            return false;
+OLAPStatus read_write_test_file(const string& test_file_path) {
+    if (access(test_file_path.c_str(), F_OK) == 0) {
+        if (remove(test_file_path.c_str()) != 0) {
+            char errmsg[64];
+            LOG(WARNING) << "fail to delete test file. "
+                         << "path=" << test_file_path
+                         << ", errno=" << errno << ", err=" << strerror_r(errno, errmsg, 64);
+            return OLAP_ERR_IO_ERROR;
         }
+    } else {
+        if (errno != ENOENT) {
+            char errmsg[64];
+            LOG(WARNING) << "fail to access test file. "
+                         << "path=" << test_file_path
+                         << ", errno=" << errno << ", err=" << strerror_r(errno, errmsg, 64);
+            return OLAP_ERR_IO_ERROR;
+        }
+    }
+    OLAPStatus res = OLAP_SUCCESS;
+    FileHandler file_handler;
+    if ((res = file_handler.open_with_mode(test_file_path.c_str(),
+                                           O_RDWR | O_CREAT | O_DIRECT,
+                                           S_IRUSR | S_IWUSR)) != OLAP_SUCCESS) {
+        LOG(WARNING) << "fail to create test file. path=" << test_file_path;
+        return res;
+    }
+    const size_t TEST_FILE_BUF_SIZE = 4096;
+    const size_t DIRECT_IO_ALIGNMENT = 512;
+    char *write_test_buff = nullptr;
+    char *read_test_buff = nullptr;
+    if (posix_memalign((void**) &write_test_buff, DIRECT_IO_ALIGNMENT, TEST_FILE_BUF_SIZE)!= 0) {
+        LOG(WARNING) << "fail to allocate write buffer memory. size=" <<  TEST_FILE_BUF_SIZE;
+        return OLAP_ERR_MALLOC_ERROR;
+    }
+    unique_ptr<char, decltype(&std::free)> write_buff (write_test_buff, &std::free);
+    if (posix_memalign((void**) &read_test_buff, DIRECT_IO_ALIGNMENT, TEST_FILE_BUF_SIZE)!= 0) {
+        LOG(WARNING) << "fail to allocate read buffer memory. size=" <<  TEST_FILE_BUF_SIZE;
+        return OLAP_ERR_MALLOC_ERROR;
+    }
+    unique_ptr<char, decltype(&std::free)> read_buff (read_test_buff, &std::free);
+    // generate random numbers
+    uint32_t rand_seed = static_cast<uint32_t>(time(NULL));
+    for (size_t i = 0; i < TEST_FILE_BUF_SIZE; ++i) {
+        int32_t tmp_value = rand_r(&rand_seed);
+        write_test_buff[i] = static_cast<char>(tmp_value);
+    }
+    if ((res = file_handler.pwrite(write_buff.get(), TEST_FILE_BUF_SIZE, SEEK_SET)) != OLAP_SUCCESS) {
+        LOG(WARNING) << "fail to write test file. [file_name=" << test_file_path << "]";
+        return res;
+    }
+    if ((res = file_handler.pread(read_buff.get(), TEST_FILE_BUF_SIZE, SEEK_SET)) != OLAP_SUCCESS) {
+        LOG(WARNING) << "fail to read test file. [file_name=" << test_file_path << "]";
+        return res;
+    }
+    if (memcmp(write_buff.get(), read_buff.get(), TEST_FILE_BUF_SIZE) != 0) {
+        LOG(WARNING) << "the test file write_buf and read_buf not equal, [file_name = " << test_file_path << "]";
+        return OLAP_ERR_TEST_FILE_ERROR;
+    }
+    if ((res = file_handler.close()) != OLAP_SUCCESS) {
+        LOG(WARNING) << "fail to close test file. [file_name=" << test_file_path << "]";
+        return res;
+    }
+    if (remove(test_file_path.c_str()) != 0) {
+        char errmsg[64];
+        VLOG(3) << "fail to delete test file. [err='" << strerror_r(errno, errmsg, 64)
+                << "' path='" << test_file_path << "']";
+        return OLAP_ERR_IO_ERROR;
+    }
+    return res;
+}
+
+bool check_datapath_rw(const string& path) {
+    if (!FileUtils::check_exist(path))
+        return false;
+    string file_path = path + "/.read_write_test_file";
+    try {
+        OLAPStatus res = read_write_test_file(file_path);
+        return res == OLAP_SUCCESS;
     } catch (...) {
         // do nothing
     }
-
-    OLAP_LOG_WARNING("boost exception when check exist and return false. [path=%s]", path.c_str());
-    
+    LOG(WARNING) << "error when try to read and write temp file under the data path and return false. [path=" << path << "]";
     return false;
 }
 
-OLAPStatus create_dirs(const string& path) {
-    boost::filesystem::path p(path.c_str());
 
-    try {
-        if (boost::filesystem::create_directories(p)) {
-            OLAP_LOG_TRACE("create dir success. [path='%s']", path.c_str());
-            return OLAP_SUCCESS;
-        }
-    } catch (const boost::filesystem::filesystem_error& e) {
-        OLAP_LOG_WARNING("error message: [err_msg='%s']", e.code().message().c_str());
-    } catch (std::exception& e) { 
-        OLAP_LOG_WARNING("error message: [exception='%s']", e.what());
-    } catch (...) {
-        // do nothing
-        OLAP_LOG_WARNING("unknown exception.");
-    }
-
-    OLAP_LOG_WARNING("fail to create dir. [path='%s']", path.c_str());
-    
-    return OLAP_ERR_CANNOT_CREATE_DIR;
-}
-
-OLAPStatus create_dir(const string& path) {
-    boost::filesystem::path p(path.c_str());
-
-    try {
-        if (boost::filesystem::create_directory(p)) {
-            OLAP_LOG_TRACE("create dir success. [path='%s']", path.c_str());
-            return OLAP_SUCCESS;
-        }
-    } catch (...) {
-        // do nothing
-    }
-
-    OLAP_LOG_WARNING("fail to create dir. [path='%s']", path.c_str());
-    
-    return OLAP_ERR_CANNOT_CREATE_DIR;
-}
 
 OLAPStatus copy_dir(const string &src_dir, const string &dst_dir) {
     boost::filesystem::path src_path(src_dir.c_str());
@@ -1327,13 +1080,13 @@ OLAPStatus copy_dir(const string &src_dir, const string &dst_dir) {
         }
         
         if (boost::filesystem::exists(dst_path)) {
-            OLAP_LOG_WARNING("Dst dir already exists.[dst_path=%s]", dst_path.string().c_str());
+            LOG(WARNING) << "Dst dir already exists.[dst_path=" << dst_path.string() << "]";
             return OLAP_ERR_CREATE_FILE_ERROR;
         }
         
         // Create the destination directory
         if (!boost::filesystem::create_directory(dst_path)) {
-            OLAP_LOG_WARNING("Unable to create dst dir.[dst_path=%s]", dst_path.string().c_str());
+            LOG(WARNING) << "Unable to create dst dir.[dst_path=" << dst_path.string() << "]";
             return OLAP_ERR_CREATE_FILE_ERROR;
         }
     } catch (...) {
@@ -1373,60 +1126,6 @@ OLAPStatus copy_dir(const string &src_dir, const string &dst_dir) {
     return OLAP_SUCCESS;
 }
 
-// failed when there are files or dirs under thr dir
-OLAPStatus remove_dir(const string& path) {
-    boost::filesystem::path p(path.c_str());
-
-    try {
-        if (boost::filesystem::remove(p)) {
-            OLAP_LOG_TRACE("success to del dir. [path='%s']", path.c_str());
-            return OLAP_SUCCESS;
-        }
-    } catch (...) {
-        // do nothing
-    }
-
-    OLAP_LOG_WARNING("fail to del dir. [path='%s']", path.c_str());
-
-    return OLAP_ERR_CANNOT_CREATE_DIR;
-}
-
-OLAPStatus remove_parent_dir(const string& path) {
-    OLAPStatus res = OLAP_SUCCESS;
-
-    try {
-        boost::filesystem::path path_name(path);
-        boost::filesystem::path parent_path = path_name.parent_path();
-
-        if (boost::filesystem::exists(parent_path)) {
-            boost::filesystem::remove(parent_path);
-        }
-    } catch (...) {
-        OLAP_LOG_WARNING("fail to del parent path. [chile path='%s']", path.c_str());
-        res = OLAP_ERR_STL_ERROR;
-    }
-
-    return res;
-}
-
-// remove all files or dirs under the dir.
-OLAPStatus remove_all_dir(const string& path) {
-    boost::filesystem::path p(path.c_str());
-
-    try {
-        if (boost::filesystem::remove_all(p)) {
-            OLAP_LOG_TRACE("success to del all dir. [path='%s']", path.c_str());
-            return OLAP_SUCCESS;
-        }
-    } catch (...) {
-        // do nothing
-    }
-
-    OLAP_LOG_WARNING("fail to del all dir. [path='%s']", path.c_str());
-
-    return OLAP_ERR_CANNOT_CREATE_DIR;
-}
-
 __thread char Errno::_buf[BUF_SIZE]; ///< buffer instance
 
 const char *Errno::str() {
@@ -1444,85 +1143,6 @@ const char *Errno::str(int no) {
 
 int Errno::no() {
     return errno;
-}
-
-OLAPStatus dir_walk(const string& root,
-                    set<string>* dirs,
-                    set<string>* files) {
-    DIR* dirp = NULL;
-    struct stat stat_data;
-    struct dirent* direntp = NULL;
-    dirp = opendir(root.c_str());
-    if (NULL == dirp) {
-        OLAP_LOG_WARNING("can't find root dir. [dir='%s']", root.c_str());
-        return OLAP_ERR_INIT_FAILED;
-    }
-    
-    while ((direntp = readdir(dirp)) != NULL) {
-        // 去掉. .. 和.开头的隐藏文件
-        if ('.' == direntp->d_name[0]) {
-            continue;
-        }
-        // 检查找到的目录项是文件还是目录
-        string tmp_ent = root + '/' + direntp->d_name;
-        if (lstat(tmp_ent.c_str(), &stat_data) < 0) {
-            OLAP_LOG_WARNING("lstat error.");
-            continue;
-        }
-
-        if (S_ISDIR(stat_data.st_mode)) {
-            OLAP_LOG_DEBUG("find dir. [d_name='%s']", direntp->d_name);
-            if (NULL != dirs) {
-                dirs->insert(direntp->d_name);
-            }
-        } else {
-            OLAP_LOG_DEBUG("find file. [d_name='%s']", direntp->d_name);
-            if (NULL != files) {
-                files->insert(direntp->d_name);
-            }
-        }
-    }
-    closedir(dirp);
-
-    return OLAP_SUCCESS;
-}
-
-OLAPStatus remove_unused_files(const string& schema_hash_root,
-                           const set<string>& files,
-                           const string& header,
-                           const set<string>& indices,
-                           const set<string>& datas) {
-    // 从列表中去掉使用的的index文件
-    set<string> tmp_set;
-    set_difference(files.begin(),
-                   files.end(),
-                   indices.begin(),
-                   indices.end(),
-                   inserter(tmp_set, tmp_set.end()));
-    
-    // 从列表中去掉使用的的data文件
-    set<string> different_set;
-    set_difference(tmp_set.begin(),
-                   tmp_set.end(),
-                   datas.begin(),
-                   datas.end(),
-                   inserter(different_set, different_set.end()));
-    
-    // 从列表中去掉使用的header文件
-    different_set.erase(header);
-    // 遍历所有没有使用的文件
-    for (set<string>::const_iterator it = different_set.begin(); it != different_set.end(); ++it) {
-        if (ENDSWITH(*it, ".hdr") || ENDSWITH(*it, ".idx") || ENDSWITH(*it, ".dat")) {
-            OLAP_LOG_INFO("delete unused file. [file='%s']", it->c_str());
-            move_to_trash(boost::filesystem::path(schema_hash_root),
-                          boost::filesystem::path(schema_hash_root + "/" + *it));
-        } else {
-            // 除了.hdr, .idx, .dat其他文件均忽略
-            continue;
-        }
-    }
-
-    return OLAP_SUCCESS;
 }
 
 template <>
@@ -1566,7 +1186,7 @@ bool valid_decimal(const string &value_str, const uint32_t precision, const uint
     boost::regex e(decimal_pattern);
     boost::smatch what;
     if (!boost::regex_match(value_str, what, e) || what[0].str().size() != value_str.size()) {
-        OLAP_LOG_WARNING("invalid decimal value. [value=%s]", value_str.c_str());
+        LOG(WARNING) << "invalid decimal value. [value=" << value_str << "]";
         return false;
     }
 
@@ -1645,6 +1265,15 @@ bool valid_datetime(const string &value_str) {
     }
 }
 
+bool valid_bool(const std::string& value_str) {
+    if (value_str == "0" || value_str == "1") {
+        return true;
+    }
+    StringParser::ParseResult result;
+    StringParser::string_to_bool(value_str.c_str(), value_str.length(), &result);
+    return result == StringParser::PARSE_SUCCESS;
+}
+
 void write_log_info(char *buf, size_t buf_len, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -1654,4 +1283,4 @@ void write_log_info(char *buf, size_t buf_len, const char *fmt, ...) {
     va_end(args);
 }
 
-}  // namespace palo
+}  // namespace doris

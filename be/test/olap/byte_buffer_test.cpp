@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -16,12 +18,13 @@
 #include <gtest/gtest.h>
 #include <sys/mman.h>
 
-#include "olap/column_file/byte_buffer.h"
+#include "boost/filesystem.hpp"
+#include "olap/byte_buffer.h"
 #include "olap/file_helper.h"
+#include "common/configbase.h"
 #include "util/logging.h"
 
-namespace palo {
-namespace column_file {
+namespace doris {
 
 class TestByteBuffer : public testing::Test {
 public:
@@ -30,14 +33,17 @@ public:
     virtual void SetUp() {
     }
     virtual void TearDown() {
+        if (boost::filesystem::exists(".test_byte_buffer")) {
+            ASSERT_TRUE(boost::filesystem::remove_all(".test_byte_buffer"));
+        }
     }
 };
 
 // 测试基本的读写功能
 TEST_F(TestByteBuffer, TestReadWrite) {
-    ByteBuffer *buf1 = NULL;
+    StorageByteBuffer *buf1 = NULL;
 
-    buf1 = ByteBuffer::create(100);
+    buf1 = StorageByteBuffer::create(100);
     ASSERT_TRUE(buf1 != NULL);
 
     char in[10] = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'};
@@ -105,21 +111,21 @@ TEST_F(TestByteBuffer, TestReadWrite) {
 // 测试ByteBuffer对内存的引用, 尤其是智能指针的引用传递
 // 使用valgrind进行内存泄露检查
 TEST_F(TestByteBuffer, TestRef) {
-    ByteBuffer *buf1 = NULL;
+    StorageByteBuffer *buf1 = NULL;
 
-    buf1 = ByteBuffer::create(1000);
+    buf1 = StorageByteBuffer::create(1000);
     ASSERT_TRUE(buf1 != NULL);
 
     for (int i = 0; i < 256; i++) {
         ASSERT_EQ(OLAP_SUCCESS, buf1->put(i));
     }
-    ByteBuffer buf2 = *buf1;
+    StorageByteBuffer buf2 = *buf1;
     ASSERT_EQ(buf2.array(), buf1->array());
-    ByteBuffer buf4(*buf1);
+    StorageByteBuffer buf4(*buf1);
     ASSERT_EQ(buf2.array(), buf1->array());
 
-    ByteBuffer *buf3 = NULL;
-    buf3 = ByteBuffer::reference_buffer(buf1, 10, 90);
+    StorageByteBuffer *buf3 = NULL;
+    buf3 = StorageByteBuffer::reference_buffer(buf1, 10, 90);
 
     ASSERT_EQ(90u, buf3->capacity());
     ASSERT_EQ(90u, buf3->limit());
@@ -153,7 +159,7 @@ TEST_F(TestByteBuffer, TestMmap) {
 
     res = file_handle.open(file_name, O_RDWR);
     ASSERT_EQ(OLAP_SUCCESS, res);
-    ByteBuffer * buf1 = ByteBuffer::mmap(NULL, 80, PROT_READ | PROT_WRITE, MAP_SHARED,
+    StorageByteBuffer * buf1 = StorageByteBuffer::mmap(NULL, 80, PROT_READ | PROT_WRITE, MAP_SHARED,
                                          file_handle.fd(), 0);
     // mmap完成后就可以关闭原fd
     file_handle.close();
@@ -182,15 +188,14 @@ TEST_F(TestByteBuffer, TestMmap) {
 }
 
 }
-}
 
 int main(int argc, char** argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    if (!palo::config::init(conffile.c_str(), false)) {
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
         fprintf(stderr, "error read config file. \n");
         return -1;
     }
-    palo::init_glog("be-test");
+    doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

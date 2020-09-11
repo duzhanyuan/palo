@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -20,7 +17,7 @@
 
 #include "exec/pl_task_root.h"
 
-namespace palo {
+namespace doris {
 
 ExchangeNode::ExchangeNode(
         ObjectPool* pool, 
@@ -35,8 +32,8 @@ ExchangeNode::ExchangeNode(
 ExchangeNode::~ExchangeNode() {
 }
 
-Status ExchangeNode::init(const TPlanNode& tnode) {
-    return ExecNode::init(tnode);
+Status ExchangeNode::init(const TPlanNode& tnode, RuntimeState* state) {
+    return ExecNode::init(tnode, state);
 }
 
 Status ExchangeNode::prepare(RuntimeState* state) {
@@ -48,18 +45,18 @@ Status ExchangeNode::prepare(RuntimeState* state) {
     DCHECK_GT(_num_senders, 0);
     _stream_recvr = state->create_recvr(_row_descriptor, _id, _num_senders,
                                        config::exchg_node_buffer_size_bytes, runtime_profile());
-    return Status::OK;
+    return Status::OK();
 }
 
 Status ExchangeNode::open(RuntimeState* state) {
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     RETURN_IF_ERROR(ExecNode::open(state));
-    return Status::OK;
+    return Status::OK();
 }
 
 Status ExchangeNode::close(RuntimeState* state) {
     if (is_closed()) {
-        return Status::OK;
+        return Status::OK();
     }
     return ExecNode::close(state);
 }
@@ -70,7 +67,7 @@ Status ExchangeNode::get_next(RuntimeState* state, RowBatch* output_batch, bool*
 
     if (reached_limit()) {
         *eos = true;
-        return Status::OK;
+        return Status::OK();
     }
 
     ExprContext* const* ctxs = &_conjunct_ctxs[0];
@@ -105,12 +102,12 @@ Status ExchangeNode::get_next(RuntimeState* state, RowBatch* output_batch, bool*
 
             if (reached_limit()) {
                 *eos = true;
-                return Status::OK;
+                return Status::OK();
             }
 
             if (output_batch->is_full()) {
                 *eos = false;
-                return Status::OK;
+                return Status::OK();
             }
         }
 
@@ -127,13 +124,13 @@ Status ExchangeNode::get_next(RuntimeState* state, RowBatch* output_batch, bool*
                   << " instance_id=" << state->fragment_instance_id();
 
         if (is_cancelled) {
-            return Status::CANCELLED;
+            return Status::Cancelled("Cancelled");
         }
 
         *eos = (_input_batch.get() == NULL);
 
         if (*eos) {
-            return Status::OK;
+            return Status::OK();
         }
 
         _next_row_idx = 0;

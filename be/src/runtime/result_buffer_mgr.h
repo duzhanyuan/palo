@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_RUNTIME_RESULT_BUFFER_MGR_H
-#define BDG_PALO_BE_RUNTIME_RESULT_BUFFER_MGR_H
+#ifndef DORIS_BE_RUNTIME_RESULT_BUFFER_MGR_H
+#define DORIS_BE_RUNTIME_RESULT_BUFFER_MGR_H
 
 #include <map>
 #include <vector>
@@ -30,11 +27,18 @@
 #include <boost/thread/thread.hpp>
 #include "common/status.h"
 #include "gen_cpp/Types_types.h"
+#include "util/uid_util.h"
+#include "gutil/ref_counted.h"
+#include "util/thread.h"
+#include "util/uid_util.h"
 
-namespace palo {
+namespace doris {
 
 class TFetchDataResult;
 class BufferControlBlock;
+class GetResultBatchCtx;
+class PUniqueId;
+
 // manage all result buffer control block in one backend
 class ResultBufferMgr {
 public:
@@ -49,6 +53,9 @@ public:
                         boost::shared_ptr<BufferControlBlock>* sender);
     // fetch data, used by RPC
     Status fetch_data(const TUniqueId& fragment_id, TFetchDataResult* result);
+
+    void fetch_data(const PUniqueId& finst_id, GetResultBatchCtx* ctx);
+
     // cancel
     Status cancel(const TUniqueId& fragment_id);
 
@@ -56,8 +63,8 @@ public:
     Status cancel_at_time(time_t cancel_time, const TUniqueId& query_id);
 
 private:
-    typedef boost::unordered_map<TUniqueId, boost::shared_ptr<BufferControlBlock> > BufferMap;
-    typedef std::map<time_t, std::vector<TUniqueId> > TimeoutMap;
+    typedef boost::unordered_map<TUniqueId, boost::shared_ptr<BufferControlBlock>> BufferMap;
+    typedef std::map<time_t, std::vector<TUniqueId>> TimeoutMap;
 
     boost::shared_ptr<BufferControlBlock> find_control_block(const TUniqueId& query_id);
 
@@ -65,7 +72,6 @@ private:
     // when fe crush, this thread clear the buffer avoid memory leak in this backend
     void cancel_thread();
 
-    bool _is_stop;
     // lock for buffer map
     boost::mutex _lock;
     // buffer block map
@@ -78,7 +84,8 @@ private:
     // cancel time maybe equal, so use one list
     TimeoutMap _timeout_map;
 
-    boost::scoped_ptr<boost::thread> _cancel_thread;
+    CountDownLatch _stop_background_threads_latch;
+    scoped_refptr<Thread> _clean_thread;
 };
 
 // TUniqueId hash function used for boost::unordered_map

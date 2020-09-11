@@ -28,12 +28,6 @@ using std::min;
 using std::reverse;
 using std::sort;
 using std::swap;
-#include <ext/hash_map>
-using __gnu_cxx::hash;
-using __gnu_cxx::hash_map;
-#include <ext/hash_set>
-using __gnu_cxx::hash;
-using __gnu_cxx::hash_set;
 #include <iterator>
 using std::back_insert_iterator;
 using std::iterator_traits;
@@ -50,6 +44,8 @@ using std::make_pair;
 using std::pair;
 #include <vector>
 using std::vector;
+#include <unordered_map>
+#include <unordered_set>
 
 #include <common/logging.h>
 
@@ -131,8 +127,8 @@ namespace strings {
 // string, StringPiece, Cord, or any object that has a constructor (explicit or
 // not) that takes a single StringPiece argument. This pattern works for all
 // standard STL containers including vector, list, deque, set, multiset, map,
-// and multimap, non-standard containers including hash_set and hash_map, and
-// even std::pair which is not actually a container.
+// multimap, unordered_set and unordered_map, and even std::pair which is not
+// actually a container.
 //
 // Splitting to std::pair is an interesting case because it can hold only two
 // elements and is not a collection type. When splitting to an std::pair the
@@ -679,7 +675,7 @@ void SplitStringPieceToVector(const StringPiece& full,
 void SplitStringUsing(const string& full, const char* delimiters,
                       vector<string>* result);
 void SplitStringToHashsetUsing(const string& full, const char* delimiters,
-                               hash_set<string>* result);
+                               std::unordered_set<string>* result);
 void SplitStringToSetUsing(const string& full, const char* delimiters,
                            set<string>* result);
 // The even-positioned (0-based) components become the keys for the
@@ -690,7 +686,7 @@ void SplitStringToSetUsing(const string& full, const char* delimiters,
 void SplitStringToMapUsing(const string& full, const char* delim,
                            map<string, string>* result);
 void SplitStringToHashmapUsing(const string& full, const char* delim,
-                               hash_map<string, string>* result);
+                               std::unordered_map<string, string>* result);
 
 // ----------------------------------------------------------------------
 // SplitStringAllowEmpty()
@@ -744,7 +740,7 @@ void SplitStringWithEscapingToSet(const string& full,
                                   set<string>* result);
 void SplitStringWithEscapingToHashset(const string& full,
                                       const strings::CharSet& delimiters,
-                                      hash_set<string>* result);
+                                      std::unordered_set<string>* result);
 
 // ----------------------------------------------------------------------
 // SplitStringIntoNPiecesAllowEmpty()
@@ -1036,7 +1032,7 @@ bool SplitStringIntoKeyValues(const string& line,
 bool SplitStringIntoKeyValuePairs(const string& line,
                                   const string& key_value_delimiters,
                                   const string& key_value_pair_delimiters,
-                                  vector<pair<string, string> >* kv_pairs);
+                                  vector<pair<string, string>>* kv_pairs);
 
 
 // ----------------------------------------------------------------------

@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -22,11 +24,12 @@
 #include "olap/utils.h"
 #include "exprs/expr.h"
 #include "util/debug_util.h"
+#include "util/types.h"
 #include "runtime/primitive_type.h"
 #include "runtime/row_batch.h"
 #include "runtime/tuple_row.h"
 
-namespace palo {
+namespace doris {
 
 DppWriter::DppWriter(
             int32_t schema_hash, 
@@ -68,7 +71,7 @@ Status DppWriter::open() {
     _buf = new char[k_buf_len];
     _pos = _buf;
     _end = _buf + k_buf_len;
-    return Status::OK;
+    return Status::OK();
 }
 
 void DppWriter::reset_buf() {
@@ -178,7 +181,7 @@ Status DppWriter::append_one_row(TupleRow* row) {
         case TYPE_HLL:
            const StringValue* str_val = (const StringValue*)(item);
             if (UNLIKELY(str_val->ptr == nullptr && str_val->len != 0)) {
-              return Status("String value ptr is null");
+              return Status::InternalError("String value ptr is null");
             }
 
             // write len first
@@ -186,7 +189,7 @@ Status DppWriter::append_one_row(TupleRow* row) {
             if (len != str_val->len) {
                 std::stringstream ss;
                 ss << "length of string is overflow.len=" << str_val->len;
-                return Status(ss.str());
+                return Status::InternalError(ss.str());
             }
             append_to_buf(&len, 2);
              // passing a NULL pointer to memcpy may be core/
@@ -200,7 +203,7 @@ Status DppWriter::append_one_row(TupleRow* row) {
            
             const StringValue* str_val = (const StringValue*)(item);
            if (UNLIKELY(str_val->ptr == nullptr || str_val->len == 0)) {
-                return Status("String value ptr is null");
+                return Status::InternalError("String value ptr is null");
             }
             append_to_buf(str_val->ptr, str_val->len);
             break;
@@ -213,22 +216,30 @@ Status DppWriter::append_one_row(TupleRow* row) {
             append_to_buf(&frac_val, sizeof(frac_val));
             break;
         }
+        case TYPE_DECIMALV2: {
+            const DecimalV2Value decimal_val(reinterpret_cast<const PackedInt128*>(item)->value);
+            int64_t int_val = decimal_val.int_value();
+            int32_t frac_val = decimal_val.frac_value();
+            append_to_buf(&int_val, sizeof(int_val));
+            append_to_buf(&frac_val, sizeof(frac_val));
+            break;
+        }
         default: {
             std::stringstream ss;
             ss << "Unknown column type " << _output_expr_ctxs[i]->root()->type();
-            return Status(ss.str());
+            return Status::InternalError(ss.str());
         }
         }
 
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status DppWriter::add_batch(RowBatch* batch) {
     int num_rows = batch->num_rows();
     if (num_rows <= 0) {
-        return Status::OK;
+        return Status::OK();
     }
 
     Status status;
@@ -245,7 +256,7 @@ Status DppWriter::add_batch(RowBatch* batch) {
         int len = _pos - _buf;
         OLAPStatus olap_status = _fp->write(_buf, len);
         if (olap_status != OLAP_SUCCESS) {
-            return Status("write to file failed.");
+            return Status::InternalError("write to file failed.");
         }
         _content_adler32 = olap_adler32(_content_adler32, _buf, len);
         _write_len += len;
@@ -258,7 +269,7 @@ Status DppWriter::write_header() {
     _header.set_file_length(_header.size() + _write_len);
     _header.set_checksum(_content_adler32);
     _header.serialize(_fp);
-    return Status::OK;
+    return Status::OK();
 }
 
 Status DppWriter::close() {

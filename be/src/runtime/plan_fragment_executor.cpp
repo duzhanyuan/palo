@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -25,7 +22,6 @@
 #include <boost/unordered_map.hpp>
 #include <boost/foreach.hpp>
 
-#include "codegen/llvm_codegen.h"
 #include "common/logging.h"
 #include "common/object_pool.h"
 #include "exec/data_sink.h"
@@ -33,29 +29,35 @@
 #include "exec/exchange_node.h"
 #include "exec/scan_node.h"
 #include "exprs/expr.h"
+#include "runtime/exec_env.h"
 #include "runtime/descriptors.h"
 #include "runtime/data_stream_mgr.h"
 #include "runtime/result_buffer_mgr.h"
+#include "runtime/result_queue_mgr.h"
 #include "runtime/row_batch.h"
 #include "runtime/mem_tracker.h"
 #include "util/cpu_info.h"
-#include "util/debug_util.h"
+#include "util/uid_util.h"
 #include "util/container_util.hpp"
 #include "util/parse_util.h"
+#include "util/pretty_printer.h"
 #include "util/mem_info.h"
 
-namespace palo {
+namespace doris {
 
 PlanFragmentExecutor::PlanFragmentExecutor(
     ExecEnv* exec_env, const report_status_callback& report_status_cb)
     : _exec_env(exec_env),
+      _plan(nullptr),
       _report_status_cb(report_status_cb),
       _report_thread_active(false),
       _done(false),
       _prepared(false),
       _closed(false),
       _has_thread_token(false),
-      _is_report_success(true) {
+      _is_report_success(true),
+      _is_report_on_cancel(true),
+      _collect_query_statistics_with_every_batch(false) {
 }
 
 PlanFragmentExecutor::~PlanFragmentExecutor() {
@@ -71,12 +73,12 @@ Status PlanFragmentExecutor::prepare(const TExecPlanFragmentParams& request) {
     _query_id = params.query_id;
 
     LOG(INFO) << "Prepare(): query_id=" << print_id(_query_id)
-               << " instance_id=" << print_id(params.fragment_instance_id)
+               << " fragment_instance_id=" << print_id(params.fragment_instance_id)
                << " backend_num=" << request.backend_num;
     // VLOG(2) << "request:\n" << apache::thrift::ThriftDebugString(request);
 
     _runtime_state.reset(new RuntimeState(
-            request, request.query_options, request.query_globals.now_string, _exec_env));
+            request, request.query_options, request.query_globals, _exec_env));
 
     RETURN_IF_ERROR(_runtime_state->init_mem_trackers(_query_id));
     _runtime_state->set_be_number(request.backend_num);
@@ -112,24 +114,27 @@ Status PlanFragmentExecutor::prepare(const TExecPlanFragmentParams& request) {
     //     _runtime_state->mem_trackers()->push_back(_exec_env->process_mem_tracker());
     // }
 
-    if (request.query_options.mem_limit > 0) {
-        // we have a per-query limit
-        int64_t bytes_limit = request.query_options.mem_limit;
-        // NOTE: this MemTracker only for olap
-        _mem_tracker.reset(
-                new MemTracker(bytes_limit, "fragment mem-limit", _exec_env->process_mem_tracker()));
-        _runtime_state->set_fragment_mem_tracker(_mem_tracker.get());
-
-        if (bytes_limit > MemInfo::physical_mem()) {
-            LOG(WARNING) << "Memory limit "
-                         << PrettyPrinter::print(bytes_limit, TUnit::BYTES)
-                         << " exceeds physical memory of "
-                         << PrettyPrinter::print(MemInfo::physical_mem(), TUnit::BYTES);
-        }
-
-        LOG(INFO) << "Using query memory limit: "
-                   << PrettyPrinter::print(bytes_limit, TUnit::BYTES);
+    int64_t bytes_limit = request.query_options.mem_limit;
+    if (bytes_limit <= 0) {
+        // sometimes the request does not set the query mem limit, we use default one.
+        // TODO(cmy): we should not allow request without query mem limit.
+        bytes_limit = 2 * 1024 * 1024 * 1024L;
     }
+
+    if (bytes_limit > _exec_env->process_mem_tracker()->limit()) {
+        LOG(WARNING) << "Query memory limit "
+            << PrettyPrinter::print(bytes_limit, TUnit::BYTES)
+            << " exceeds process memory limit of "
+            << PrettyPrinter::print(_exec_env->process_mem_tracker()->limit(), TUnit::BYTES)
+            << ". Using process memory limit instead";
+        bytes_limit = _exec_env->process_mem_tracker()->limit();
+    }
+    // NOTE: this MemTracker only for olap
+    _mem_tracker = MemTracker::CreateTracker(bytes_limit, "fragment mem-limit", _exec_env->process_mem_tracker());
+    _runtime_state->set_fragment_mem_tracker(_mem_tracker);
+
+    LOG(INFO) << "Using query memory limit: "
+        << PrettyPrinter::print(bytes_limit, TUnit::BYTES);
 
     RETURN_IF_ERROR(_runtime_state->create_block_mgr());
 
@@ -142,7 +147,7 @@ Status PlanFragmentExecutor::prepare(const TExecPlanFragmentParams& request) {
     // set up plan
     DCHECK(request.__isset.fragment);
     RETURN_IF_ERROR(
-            ExecNode::create_tree(obj_pool(), request.fragment.plan, *desc_tbl, &_plan));
+            ExecNode::create_tree(_runtime_state.get(), obj_pool(), request.fragment.plan, *desc_tbl, &_plan));
     _runtime_state->set_fragment_root_id(_plan->id());
 
     if (request.params.__isset.debug_node_id) {
@@ -163,14 +168,16 @@ Status PlanFragmentExecutor::prepare(const TExecPlanFragmentParams& request) {
         static_cast<ExchangeNode*>(exch_node)->set_num_senders(num_senders);
     }
 
+ 
     RETURN_IF_ERROR(_plan->prepare(_runtime_state.get()));
-
     // set scan ranges
     std::vector<ExecNode*> scan_nodes;
     std::vector<TScanRangeParams> no_scan_ranges;
     _plan->collect_scan_nodes(&scan_nodes);
     VLOG(1) << "scan_nodes.size()=" << scan_nodes.size();
     VLOG(1) << "params.per_node_scan_ranges.size()=" << params.per_node_scan_ranges.size();
+
+    _plan->try_do_aggregate_serde_improve();
 
     for (int i = 0; i < scan_nodes.size(); ++i) {
         ScanNode* scan_node = static_cast<ScanNode*>(scan_nodes[i]);
@@ -180,9 +187,9 @@ Status PlanFragmentExecutor::prepare(const TExecPlanFragmentParams& request) {
         VLOG(1) << "scan_node_Id=" << scan_node->id() << " size=" << scan_ranges.size();
     }
 
-    print_volume_ids(params.per_node_scan_ranges);
-
     _runtime_state->set_per_fragment_instance_idx(params.sender_id);
+    _runtime_state->set_num_per_fragment_instances(params.num_senders);
+
     // set up sink, if required
     if (request.fragment.__isset.output_sink) {
         RETURN_IF_ERROR(DataSink::create_data_sink(obj_pool(),
@@ -195,71 +202,41 @@ Status PlanFragmentExecutor::prepare(const TExecPlanFragmentParams& request) {
         if (sink_profile != NULL) {
             profile()->add_child(sink_profile, true, NULL);
         }
+
+        _collect_query_statistics_with_every_batch = params.__isset.send_query_statistics_with_every_batch ?
+            params.send_query_statistics_with_every_batch : false;
     } else {
+        // _sink is set to NULL
         _sink.reset(NULL);
     }
 
     // set up profile counters
     profile()->add_child(_plan->runtime_profile(), true, NULL);
     _rows_produced_counter = ADD_COUNTER(profile(), "RowsProduced", TUnit::UNIT);
-#if 0
-    // After preparing the plan and initializing the output sink, all functions should
-    // have been code-generated.  At this point we optimize all the functions.
-    if (_runtime_state->llvm_codegen() != NULL) {
-        Status status = _runtime_state->llvm_codegen()->optimize_module();
-
-        if (!status.ok()) {
-            LOG(ERROR) << "Error with codegen for this query: " << status.get_error_msg();
-            // TODO: propagate this to the coordinator and user?  Not really actionable
-            // for them but we'd like them to let us know.
-        }
-
-        // If codegen failed, we automatically fall back to not using codegen.
-    }
-#endif
 
     _row_batch.reset(new RowBatch(
             _plan->row_desc(),
             _runtime_state->batch_size(),
-            _runtime_state->instance_mem_tracker()));
+            _runtime_state->instance_mem_tracker().get()));
     // _row_batch->tuple_data_pool()->set_limits(*_runtime_state->mem_trackers());
     VLOG(3) << "plan_root=\n" << _plan->debug_string();
     _prepared = true;
-    return Status::OK;
-}
 
-void PlanFragmentExecutor::optimize_llvm_module() {
-    if (!_runtime_state->codegen_created()) {
-        return;
+    _query_statistics.reset(new QueryStatistics());
+    if (_sink.get() != NULL) {
+        _sink->set_query_statistics(_query_statistics);
     }
-    LlvmCodeGen* codegen = NULL;
-    Status status = _runtime_state->get_codegen(&codegen, /* initalize */ false);
-    DCHECK(status.ok());
-    DCHECK(codegen != NULL);
-    status = codegen->finalize_module();
-    if (!status.ok()) {
-        std::stringstream ss;
-        ss << "Error with codegen for this query: ";
-        _runtime_state->log_error(status.get_error_msg());
-    }
-}
-
-
-void PlanFragmentExecutor::print_volume_ids(
-    const PerNodeScanRanges& per_node_scan_ranges) {
-    if (per_node_scan_ranges.empty()) {
-        return;
-    }
+    return Status::OK();
 }
 
 Status PlanFragmentExecutor::open() {
-    LOG(INFO) << "Open(): instance_id=" << _runtime_state->fragment_instance_id();
+    LOG(INFO) << "Open(): fragment_instance_id=" << print_id(_runtime_state->fragment_instance_id());
 
     // we need to start the profile-reporting thread before calling Open(), since it
     // may block
     // TODO: if no report thread is started, make sure to send a final profile
     // at end, otherwise the coordinator hangs in case we finish w/ an error
-    if (_is_report_success && !_report_status_cb.empty() && config::status_report_interval > 0) {
+    if (!_report_status_cb.empty() && config::status_report_interval > 0) {
         boost::unique_lock<boost::mutex> l(_report_thread_lock);
         _report_thread = boost::thread(&PlanFragmentExecutor::report_profile, this);
         // make sure the thread started up, otherwise report_profile() might get into a race
@@ -267,8 +244,6 @@ Status PlanFragmentExecutor::open() {
         _report_thread_started_cv.wait(l);
         _report_thread_active = true;
     }
-
-    optimize_llvm_module();
 
     Status status = open_internal();
 
@@ -290,7 +265,7 @@ Status PlanFragmentExecutor::open_internal() {
     }
 
     if (_sink.get() == NULL) {
-        return Status::OK;
+        return Status::OK();
     }
     RETURN_IF_ERROR(_sink->open(runtime_state()));
 
@@ -311,11 +286,15 @@ Status PlanFragmentExecutor::open_internal() {
 
             for (int i = 0; i < batch->num_rows(); ++i) {
                 TupleRow* row = batch->get_row(i);
-                VLOG_ROW << print_row(row, row_desc());
+                VLOG_ROW << row->to_string(row_desc());
             }
         }
-
+     
         SCOPED_TIMER(profile()->total_time_counter());
+        // Collect this plan and sub plan statisticss, and send to parent plan.
+        if (_collect_query_statistics_with_every_batch) {
+            collect_query_statistics();
+        }
         RETURN_IF_ERROR(_sink->send(runtime_state(), batch));
     }
 
@@ -332,13 +311,14 @@ Status PlanFragmentExecutor::open_internal() {
     // audit the sinks to check that this is ok, or change that behaviour.
     {
         SCOPED_TIMER(profile()->total_time_counter());
-        Status status = _sink->close(runtime_state(), _status);
+        collect_query_statistics();
+        Status status;
+        {
+            boost::lock_guard<boost::mutex> l(_status_lock);
+            status = _status;
+        }
+        status = _sink->close(runtime_state(), status);
         RETURN_IF_ERROR(status);
-    }
-    {
-        std::stringstream ss;
-        profile()->pretty_print(&ss);
-        LOG(INFO) << ss.str();
     }
 
     // Setting to NULL ensures that the d'tor won't double-close the sink.
@@ -350,7 +330,12 @@ Status PlanFragmentExecutor::open_internal() {
     stop_report_thread();
     send_report(true);
 
-    return Status::OK;
+    return Status::OK();
+}
+
+void PlanFragmentExecutor::collect_query_statistics() {
+    _query_statistics->clear();
+    _plan->collect_query_statistics(_query_statistics.get());
 }
 
 void PlanFragmentExecutor::report_profile() {
@@ -370,22 +355,27 @@ void PlanFragmentExecutor::report_profile() {
         boost::get_system_time() + boost::posix_time::seconds(report_fragment_offset);
     // We don't want to wait longer than it takes to run the entire fragment.
     _stop_report_thread_cv.timed_wait(l, timeout);
-
+    bool is_report_profile_interval = _is_report_success && config::status_report_interval > 0;
     while (_report_thread_active) {
-        boost::system_time timeout =
-            boost::get_system_time() + boost::posix_time::seconds(config::status_report_interval);
-
-        // timed_wait can return because the timeout occurred or the condition variable
-        // was signaled.  We can't rely on its return value to distinguish between the
-        // two cases (e.g. there is a race here where the wait timed out but before grabbing
-        // the lock, the condition variable was signaled).  Instead, we will use an external
-        // flag, _report_thread_active, to coordinate this.
-        _stop_report_thread_cv.timed_wait(l, timeout);
+        if (is_report_profile_interval) {
+            boost::system_time timeout =
+                boost::get_system_time() + boost::posix_time::seconds(config::status_report_interval);
+            // timed_wait can return because the timeout occurred or the condition variable
+            // was signaled.  We can't rely on its return value to distinguish between the
+            // two cases (e.g. there is a race here where the wait timed out but before grabbing
+            // the lock, the condition variable was signaled).  Instead, we will use an external
+            // flag, _report_thread_active, to coordinate this.
+            _stop_report_thread_cv.timed_wait(l, timeout);
+        } else {
+            // Artificial triggering, such as show proc "/current_queries".
+            _stop_report_thread_cv.wait(l);
+        }
 
         if (VLOG_FILE_IS_ON) {
             VLOG_FILE << "Reporting " << (!_report_thread_active ? "final " : " ")
                       << "profile for instance " << _runtime_state->fragment_instance_id();
             std::stringstream ss;
+            profile()->compute_time_in_profile();
             profile()->pretty_print(&ss);
             VLOG_FILE << ss.str();
         }
@@ -412,7 +402,17 @@ void PlanFragmentExecutor::send_report(bool done) {
         status = _status;
     }
 
+    // If plan is done successfully, but _is_report_success is false,
+    // no need to send report.
     if (!_is_report_success && done && status.ok()) {
+        return;
+    }
+
+    // If both _is_report_success and _is_report_on_cancel are false,
+    // which means no matter query is success or failed, no report is needed.
+    // This may happen when the query limit reached and
+    // a internal cancellation being processed
+    if (!_is_report_success && !_is_report_on_cancel) {
         return;
     }
 
@@ -456,7 +456,7 @@ Status PlanFragmentExecutor::get_next(RowBatch** batch) {
 Status PlanFragmentExecutor::get_next_internal(RowBatch** batch) {
     if (_done) {
         *batch = NULL;
-        return Status::OK;
+        return Status::OK();
     }
 
     while (!_done) {
@@ -473,22 +473,26 @@ Status PlanFragmentExecutor::get_next_internal(RowBatch** batch) {
         *batch = NULL;
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
-void PlanFragmentExecutor::update_status(const Status& status) {
-    if (status.ok()) {
+void PlanFragmentExecutor::update_status(const Status& new_status) {
+    if (new_status.ok()) {
         return;
     }
 
     {
         boost::lock_guard<boost::mutex> l(_status_lock);
-
+        // if current `_status` is ok, set it to `new_status` to record the error.
         if (_status.ok()) {
-            if (status.is_mem_limit_exceeded()) {
-                _runtime_state->set_mem_limit_exceeded();
+            if (new_status.is_mem_limit_exceeded()) {
+                _runtime_state->set_mem_limit_exceeded(new_status.get_error_msg());
             }
-            _status = status;
+            _status = new_status;
+            if (_runtime_state->query_options().query_type == TQueryType::EXTERNAL) {
+                TUniqueId fragment_instance_id = _runtime_state->fragment_instance_id();
+                _exec_env->result_queue_mgr()->update_queue_status(fragment_instance_id, new_status);
+            }
         }
     }
 
@@ -497,11 +501,15 @@ void PlanFragmentExecutor::update_status(const Status& status) {
 }
 
 void PlanFragmentExecutor::cancel() {
-    LOG(INFO) << "cancel(): instance_id=" << _runtime_state->fragment_instance_id();
+    LOG(INFO) << "cancel(): fragment_instance_id=" << print_id(_runtime_state->fragment_instance_id());
     DCHECK(_prepared);
     _runtime_state->set_is_cancelled(true);
-    _runtime_state->stream_mgr()->cancel(_runtime_state->fragment_instance_id());
-    _runtime_state->result_mgr()->cancel(_runtime_state->fragment_instance_id());
+    _runtime_state->exec_env()->stream_mgr()->cancel(_runtime_state->fragment_instance_id());
+    _runtime_state->exec_env()->result_mgr()->cancel(_runtime_state->fragment_instance_id());
+}
+
+void PlanFragmentExecutor::set_abort() {
+    update_status(Status::Aborted("Execution aborted before start"));
 }
 
 const RowDescriptor& PlanFragmentExecutor::row_desc() {
@@ -529,16 +537,43 @@ void PlanFragmentExecutor::close() {
 
     // Prepare may not have been called, which sets _runtime_state
     if (_runtime_state.get() != NULL) {
-        _plan->close(_runtime_state.get());
-
-        if (_sink.get() != NULL) {
-            _sink->close(runtime_state(), _status);
+        
+        // _runtime_state init failed
+        if (_plan != nullptr) {
+            _plan->close(_runtime_state.get());
         }
 
-        _exec_env->thread_mgr()->unregister_pool(_runtime_state->resource_pool());
-    }
+        if (_sink.get() != NULL) {
+            if (_prepared) {
+                Status status;
+                {
+                    boost::lock_guard<boost::mutex> l(_status_lock);
+                    status = _status;
+                }
+                _sink->close(runtime_state(), status);
+            } else {
+                _sink->close(runtime_state(), Status::InternalError("prepare failed"));
+            }
+        }
 
-    _mem_tracker->release(_mem_tracker->consumption());
+        {
+            std::stringstream ss;
+            // Compute the _local_time_percent before pretty_print the runtime_profile
+            // Before add this operation, the print out like that:
+            // UNION_NODE (id=0):(Active: 56.720us, non-child: 00.00%)
+            // After add thie operation, the print out like that:
+            // UNION_NODE (id=0):(Active: 56.720us, non-child: 82.53%)
+            // We can easily know the exec node excute time without child time consumed.
+            _runtime_state->runtime_profile()->compute_time_in_profile();
+            _runtime_state->runtime_profile()->pretty_print(&ss);
+            LOG(INFO) << ss.str();
+        }
+    }
+     
+    // _mem_tracker init failed
+    if (_mem_tracker.get() != nullptr) {
+        _mem_tracker->Release(_mem_tracker->consumption());
+    }
     _closed = true;
 }
 

@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-namespace cpp palo
-namespace java com.baidu.palo.thrift
+namespace cpp doris
+namespace java org.apache.doris.thrift
+
 
 typedef i64 TTimestamp
 typedef i32 TPlanNodeId
@@ -35,6 +33,10 @@ typedef i64 TCount
 typedef i64 TSize
 typedef i32 TClusterId
 typedef i64 TEpoch
+
+// add for real time load, partitionid is not defined previously, define it here
+typedef i64 TTransactionId
+typedef i64 TPartitionId
 
 enum TStorageType {
     ROW,
@@ -70,6 +72,9 @@ enum TPrimitiveType {
   LARGEINT,
   VARCHAR,
   HLL,
+  DECIMALV2,
+  TIME,
+  OBJECT
 }
 
 enum TTypeNodeType {
@@ -125,13 +130,17 @@ enum TAggregationType {
     MIN,
     REPLACE,
     HLL_UNION,
-    NONE
+    NONE,
+    BITMAP_UNION,
+    REPLACE_IF_NOT_NULL
 }
 
 enum TPushType {
     LOAD,
     DELETE,
-    LOAD_DELETE
+    LOAD_DELETE,
+    // for spark load push request
+    LOAD_V2
 }
 
 enum TTaskType {
@@ -140,15 +149,27 @@ enum TTaskType {
     PUSH,
     CLONE,
     STORAGE_MEDIUM_MIGRATE,
-    ROLLUP,
-    SCHEMA_CHANGE,
-    CANCEL_DELETE,
+    ROLLUP, // Deprecated
+    SCHEMA_CHANGE,  // Deprecated
+    CANCEL_DELETE,  // Deprecated
     MAKE_SNAPSHOT,
     RELEASE_SNAPSHOT,
-    CHECK_CONSISTENCY
+    CHECK_CONSISTENCY,
     UPLOAD,
-    RESTORE,
-    CLEAR_REMOTE_FILE
+    DOWNLOAD,
+    CLEAR_REMOTE_FILE,
+    MOVE,
+    REALTIME_PUSH,
+    PUBLISH_VERSION,
+    CLEAR_ALTER_TASK,
+    CLEAR_TRANSACTION_TASK,
+    RECOVER_TABLET, // deprecated
+    STREAM_LOAD,
+    UPDATE_TABLET_META_INFO,
+    // this type of task will replace both ROLLUP and SCHEMA_CHANGE
+    ALTER,
+    INSTALL_PLUGIN,
+    UNINSTALL_PLUGIN
 }
 
 enum TStmtType {
@@ -243,6 +264,7 @@ struct TAggregateFunction {
   6: optional string finalize_fn_symbol
   8: optional string get_value_fn_symbol
   9: optional string remove_fn_symbol
+  10: optional bool is_analytic_only_fn = false
 }
 
 // Represents a function in the Catalog.
@@ -276,6 +298,7 @@ struct TFunction {
   10: optional TAggregateFunction aggregate_fn
 
   11: optional i64 id
+  12: optional string checksum
 }
 
 enum TLoadJobState {
@@ -294,11 +317,22 @@ enum TEtlState {
 }
 
 enum TTableType {
-    MYSQL_TABLE,
+    MYSQL_TABLE, // Deprecated
     OLAP_TABLE,
     SCHEMA_TABLE,
-    KUDU_TABLE,
-    BROKER_TABLE
+    KUDU_TABLE, // Deprecated
+    BROKER_TABLE,
+    ES_TABLE,
+    ODBC_TABLE
+}
+
+enum TOdbcTableType {
+    MYSQL,
+    ORACLE,
+    POSTGRESQL,
+    SQLSERVER,
+    REDIS,
+    MONGODB
 }
 
 enum TKeysType {
@@ -334,6 +368,40 @@ enum TExportState {
 enum TFileType {
     FILE_LOCAL,
     FILE_BROKER,
+    FILE_STREAM,    // file content is streaming in the buffer
 }
 
+struct TTabletCommitInfo {
+    1: required i64 tabletId
+    2: required i64 backendId
+}
+
+enum TLoadType {
+    MANUL_LOAD,
+    ROUTINE_LOAD,
+    MINI_LOAD
+}
+
+enum TLoadSourceType {
+    RAW,
+    KAFKA,
+}
+
+enum TMergeType {
+  APPEND,
+  MERGE,
+  DELETE
+}
+
+// represent a user identity
+struct TUserIdentity {
+    1: optional string username
+    2: optional string host
+    3: optional bool is_domain
+}
+
+const i32 TSNAPSHOT_REQ_VERSION1 = 3; // corresponding to alpha rowset
+const i32 TSNAPSHOT_REQ_VERSION2 = 4; // corresponding to beta rowset
+// the snapshot request should always set prefer snapshot version to TPREFER_SNAPSHOT_REQ_VERSION
+const i32 TPREFER_SNAPSHOT_REQ_VERSION = TSNAPSHOT_REQ_VERSION2;
 

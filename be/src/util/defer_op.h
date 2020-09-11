@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_UTIL_DEFER_OP_H
-#define BDG_PALO_BE_UTIL_DEFER_OP_H
+#ifndef DORIS_BE_UTIL_DEFER_OP_H
+#define DORIS_BE_UTIL_DEFER_OP_H
 
 #include <functional>
 
-namespace palo {
+namespace doris {
 
 // This class is used to defer a function when this object is deconstruct
 class DeferOp {

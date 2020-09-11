@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -24,18 +21,21 @@
 #include <map>
 #include <memory>
 
+#include "common/logging.h"
 #include "exec/exec_node.h"
+#include "exec/tablet_sink.h"
 #include "exprs/expr.h"
 #include "gen_cpp/PaloInternalService_types.h"
 #include "runtime/data_stream_sender.h"
 #include "runtime/result_sink.h"
+#include "runtime/memory_scratch_sink.h"
 #include "runtime/mysql_table_sink.h"
 #include "runtime/data_spliter.h"
 #include "runtime/export_sink.h"
 #include "runtime/runtime_state.h"
 #include "util/logging.h"
 
-namespace palo {
+namespace doris {
 
 Status DataSink::create_data_sink(
         ObjectPool* pool,
@@ -49,30 +49,40 @@ Status DataSink::create_data_sink(
     switch (thrift_sink.type) {
     case TDataSinkType::DATA_STREAM_SINK: {
         if (!thrift_sink.__isset.stream_sink) {
-            return Status("Missing data stream sink.");
+            return Status::InternalError("Missing data stream sink.");
         }
-
+        bool send_query_statistics_with_every_batch = params.__isset.send_query_statistics_with_every_batch ?
+            params.send_query_statistics_with_every_batch : false;
         // TODO: figure out good buffer size based on size of output row
         tmp_sink = new DataStreamSender(
                 pool, params.sender_id, row_desc,
-                thrift_sink.stream_sink, params.destinations, 16 * 1024);
+                thrift_sink.stream_sink, params.destinations, 16 * 1024, 
+                send_query_statistics_with_every_batch);
         // RETURN_IF_ERROR(sender->prepare(state->obj_pool(), thrift_sink.stream_sink));
         sink->reset(tmp_sink);
         break;
     }
     case TDataSinkType::RESULT_SINK:
         if (!thrift_sink.__isset.result_sink) {
-            return Status("Missing data buffer sink.");
+            return Status::InternalError("Missing data buffer sink.");
         }
 
         // TODO: figure out good buffer size based on size of output row
         tmp_sink = new ResultSink(row_desc, output_exprs, thrift_sink.result_sink, 1024);
         sink->reset(tmp_sink);
         break;
+    case TDataSinkType::MEMORY_SCRATCH_SINK:
+        if (!thrift_sink.__isset.memory_scratch_sink) {
+            return Status::InternalError("Missing data buffer sink.");
+        }
 
+        tmp_sink = new MemoryScratchSink(row_desc, output_exprs, thrift_sink.memory_scratch_sink);
+        sink->reset(tmp_sink);
+        break;
     case TDataSinkType::MYSQL_TABLE_SINK: {
+#ifdef DORIS_WITH_MYSQL
         if (!thrift_sink.__isset.mysql_table_sink) {
-            return Status("Missing data buffer sink.");
+            return Status::InternalError("Missing data buffer sink.");
         }
 
         // TODO: figure out good buffer size based on size of output row
@@ -80,11 +90,14 @@ Status DataSink::create_data_sink(
             pool, row_desc, output_exprs);
         sink->reset(mysql_tbl_sink);
         break;
+#else
+        return Status::InternalError("Don't support MySQL table, you should rebuild Doris with WITH_MYSQL option ON");
+#endif
     }
 
     case TDataSinkType::DATA_SPLIT_SINK: {
         if (!thrift_sink.__isset.split_sink) {
-            return Status("Missing data split buffer sink.");
+            return Status::InternalError("Missing data split buffer sink.");
         }
 
         // TODO: figure out good buffer size based on size of output row
@@ -98,11 +111,18 @@ Status DataSink::create_data_sink(
 
     case TDataSinkType::EXPORT_SINK: {
         if (!thrift_sink.__isset.export_sink) {
-            return Status("Missing export sink sink.");
+            return Status::InternalError("Missing export sink sink.");
         }
 
         std::unique_ptr<ExportSink> export_sink(new ExportSink(pool, row_desc, output_exprs));
         sink->reset(export_sink.release());
+        break;
+    }
+    case TDataSinkType::OLAP_TABLE_SINK: {
+        Status status;
+        DCHECK(thrift_sink.__isset.olap_table_sink);
+        sink->reset(new stream_load::OlapTableSink(pool, row_desc, output_exprs, &status));
+        RETURN_IF_ERROR(status);
         break;
     }
 
@@ -117,23 +137,24 @@ Status DataSink::create_data_sink(
         }
 
         error_msg << str << " not implemented.";
-        return Status(error_msg.str());
+        return Status::InternalError(error_msg.str());
     }
 
     if (sink->get() != NULL) {
         RETURN_IF_ERROR((*sink)->init(thrift_sink));
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status DataSink::init(const TDataSink& thrift_sink) {
-    return Status::OK;
+    return Status::OK();
 }
 
 Status DataSink::prepare(RuntimeState* state) {
-    _expr_mem_tracker.reset(new MemTracker(-1, "Data sink", state->instance_mem_tracker()));
-    return Status::OK;
+    _expr_mem_tracker = MemTracker::CreateTracker(-1, std::string("DataSink:") + std::to_string(state->load_job_id()),
+                           state->instance_mem_tracker());
+    return Status::OK();
 }
 
-}  // namespace palo
+}  // namespace doris

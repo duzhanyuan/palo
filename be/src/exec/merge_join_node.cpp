@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -30,7 +27,7 @@
 #include "util/debug_util.h"
 #include "util/runtime_profile.h"
 
-namespace palo {
+namespace doris {
 
 template<class T>
 int compare_value(const void* left_value,  const void* right_value) {
@@ -57,9 +54,9 @@ MergeJoinNode::MergeJoinNode(
 MergeJoinNode::~MergeJoinNode() {
 }
 
-Status MergeJoinNode::init(const TPlanNode& tnode) {
+Status MergeJoinNode::init(const TPlanNode& tnode, RuntimeState* state) {
     DCHECK(tnode.__isset.merge_join_node);
-    RETURN_IF_ERROR(ExecNode::init(tnode));
+    RETURN_IF_ERROR(ExecNode::init(tnode, state));
     const vector<TEqJoinCondition>& cmp_conjuncts =
         tnode.merge_join_node.cmp_conjuncts;
 
@@ -74,7 +71,7 @@ Status MergeJoinNode::init(const TPlanNode& tnode) {
     RETURN_IF_ERROR(Expr::create_expr_trees(
             _pool, tnode.merge_join_node.other_join_conjuncts,
             &_other_join_conjunct_ctxs));
-    return Status::OK;
+    return Status::OK();
 }
 
 Status MergeJoinNode::prepare(RuntimeState* state) {
@@ -115,7 +112,7 @@ Status MergeJoinNode::prepare(RuntimeState* state) {
             break;
 
         default:
-            return Status("unspport compare type.");
+            return Status::InternalError("unspport compare type.");
             break;
         }
     }
@@ -141,12 +138,12 @@ Status MergeJoinNode::prepare(RuntimeState* state) {
     _right_child_ctx.reset(
             new ChildReaderContext(row_desc(), state->batch_size(), state->instance_mem_tracker()));
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status MergeJoinNode::close(RuntimeState* state) {
     if (is_closed()) {
-        return Status::OK;
+        return Status::OK();
     }
     RETURN_IF_ERROR(exec_debug_action(TExecNodePhase::CLOSE));
     Expr::close(_left_expr_ctxs, state);
@@ -173,7 +170,7 @@ Status MergeJoinNode::open(RuntimeState* state) {
     RETURN_IF_ERROR(get_input_row(state, 0));
     RETURN_IF_ERROR(get_input_row(state, 1));
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status MergeJoinNode::get_next(RuntimeState* state, RowBatch* out_batch, bool* eos) {
@@ -183,7 +180,7 @@ Status MergeJoinNode::get_next(RuntimeState* state, RowBatch* out_batch, bool* e
 
     if (reached_limit() || _eos) {
         *eos = true;
-        return Status::OK;
+        return Status::OK();
     }
 
     while (true) {
@@ -196,7 +193,7 @@ Status MergeJoinNode::get_next(RuntimeState* state, RowBatch* out_batch, bool* e
 
         if (*eos) {
             _eos = true;
-            return Status::OK;
+            return Status::OK();
         }
 
         if (eval_conjuncts(&_other_join_conjunct_ctxs[0], _other_join_conjunct_ctxs.size(), row)) {
@@ -210,7 +207,7 @@ Status MergeJoinNode::get_next(RuntimeState* state, RowBatch* out_batch, bool* e
         }
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 void MergeJoinNode::create_output_row(TupleRow* out, TupleRow* left, TupleRow* right) {
@@ -234,10 +231,10 @@ void MergeJoinNode::create_output_row(TupleRow* out, TupleRow* left, TupleRow* r
 Status MergeJoinNode::compare_row(TupleRow* left_row, TupleRow* right_row, bool* is_lt) {
     if (left_row == NULL) {
         *is_lt = false;
-        return Status::OK;
+        return Status::OK();
     } else if (right_row == NULL) {
         *is_lt = true;
-        return Status::OK;
+        return Status::OK();
     }
 
     for (int i = 0; i < _left_expr_ctxs.size(); ++i) {
@@ -247,19 +244,19 @@ Status MergeJoinNode::compare_row(TupleRow* left_row, TupleRow* right_row, bool*
 
         if (cmp_val < 0) {
             *is_lt = true;
-            return Status::OK;
+            return Status::OK();
         } else if (cmp_val == 0) {
             // do nothing
         } else {
             *is_lt = false;
-            return Status::OK;
+            return Status::OK();
         }
     }
 
     // equal
     *is_lt = false;
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status MergeJoinNode::get_next_row(RuntimeState* state, TupleRow* out_row, bool* eos) {
@@ -268,7 +265,7 @@ Status MergeJoinNode::get_next_row(RuntimeState* state, TupleRow* out_row, bool*
 
     if (left_row == NULL && right_row == NULL) {
         *eos = true;
-        return Status::OK;
+        return Status::OK();
     }
 
     bool is_lt = true;
@@ -282,7 +279,7 @@ Status MergeJoinNode::get_next_row(RuntimeState* state, TupleRow* out_row, bool*
         RETURN_IF_ERROR(get_input_row(state, 1));
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status MergeJoinNode::get_input_row(RuntimeState* state, int child_idx) {
@@ -322,11 +319,11 @@ Status MergeJoinNode::get_input_row(RuntimeState* state, int child_idx) {
 
     if (ctx->row_idx >= ctx->batch.num_rows()) {
         ctx->current_row = NULL;
-        return Status::OK;
+        return Status::OK();
     }
 
     ctx->current_row = ctx->batch.get_row(ctx->row_idx++);
-    return Status::OK;
+    return Status::OK();
 }
 
 void MergeJoinNode::debug_string(int indentation_level, stringstream* out) const {

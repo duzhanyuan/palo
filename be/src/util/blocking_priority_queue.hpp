@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,17 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_COMMON_UTIL_BLOCKING_PRIORITY_QUEUE_HPP
-#define BDG_PALO_BE_SRC_COMMON_UTIL_BLOCKING_PRIORITY_QUEUE_HPP
+#ifndef DORIS_BE_SRC_COMMON_UTIL_BLOCKING_PRIORITY_QUEUE_HPP
+#define DORIS_BE_SRC_COMMON_UTIL_BLOCKING_PRIORITY_QUEUE_HPP
 
 #include <queue>
 #include <unistd.h>
 #include <boost/thread/condition_variable.hpp>
 #include <boost/thread/mutex.hpp>
 
+#include "common/config.h"
 #include "util/stopwatch.hpp"
 
-namespace palo {
+namespace doris {
 
 // Fixed capacity FIFO queue, where both blocking_get and blocking_put operations block
 // if the queue is empty or full, respectively.
@@ -54,7 +52,7 @@ public:
             if (!_queue.empty()) {
                 // 定期提高队列中残留的任务优先级
                 // 保证优先级较低的大查询不至于完全饿死
-                if (_upgrade_counter > 128) {
+                if (_upgrade_counter > config::priority_queue_remaining_tasks_increased_frequency) {
                     std::priority_queue<T> tmp_queue;
                     while (!_queue.empty()) {
                         T v = _queue.top();
@@ -80,6 +78,40 @@ public:
             timer.start();
             _get_cv.wait(unique_lock);
             timer.stop();
+        }
+    }
+
+    bool non_blocking_get(T* out) {
+        MonotonicStopWatch timer;
+        boost::unique_lock<boost::mutex> unique_lock(_lock);
+
+        while (true) {
+            if (!_queue.empty()) {
+                // 定期提高队列中残留的任务优先级
+                // 保证优先级较低的大查询不至于完全饿死
+                if (_upgrade_counter > config::priority_queue_remaining_tasks_increased_frequency) {
+                    std::priority_queue<T> tmp_queue;
+                    while (!_queue.empty()) {
+                        T v = _queue.top();
+                        _queue.pop();
+                        ++v;
+                        tmp_queue.push(v);
+                    }
+                    swap(_queue, tmp_queue);
+                    _upgrade_counter = 0;
+                }
+                *out = _queue.top();
+                _queue.pop();
+                ++_upgrade_counter;
+                _total_get_wait_time += timer.elapsed_time();
+                unique_lock.unlock();
+                _put_cv.notify_one();
+                return true;
+            }
+            if (_shutdown) {
+                return false;
+            }
+            return false;
         }
     }
 

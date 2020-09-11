@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -32,12 +29,11 @@
 #include "runtime/runtime_state.h"
 #include "runtime/tuple.h"
 #include "runtime/tuple_row.h"
-#include "util/debug_util.h"
 #include "util/runtime_profile.h"
 #include "util/tuple_row_compare.h"
 #include <gperftools/profiler.h>
 
-namespace palo {
+namespace doris {
 
 TopNNode::TopNNode(ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs) :
         ExecNode(pool, tnode, descs),
@@ -52,21 +48,21 @@ TopNNode::TopNNode(ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl
 TopNNode::~TopNNode() {
 }
 
-Status TopNNode::init(const TPlanNode& tnode) {
-    RETURN_IF_ERROR(ExecNode::init(tnode));
+Status TopNNode::init(const TPlanNode& tnode, RuntimeState* state) {
+    RETURN_IF_ERROR(ExecNode::init(tnode, state));
     RETURN_IF_ERROR(_sort_exec_exprs.init(tnode.sort_node.sort_info, _pool));
     _is_asc_order = tnode.sort_node.sort_info.is_asc_order;
     _nulls_first = tnode.sort_node.sort_info.nulls_first;
 
     DCHECK_EQ(_conjuncts.size(), 0) << "TopNNode should never have predicates to evaluate.";
     _abort_on_default_limit_exceeded = tnode.sort_node.is_default_limit;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status TopNNode::prepare(RuntimeState* state) {
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     RETURN_IF_ERROR(ExecNode::prepare(state));
-    _tuple_pool.reset(new MemPool(mem_tracker()));
+    _tuple_pool.reset(new MemPool(mem_tracker().get()));
     RETURN_IF_ERROR(_sort_exec_exprs.prepare(
             state, child(0)->row_desc(), _row_descriptor, expr_mem_tracker()));
     // AddExprCtxsToFree(_sort_exec_exprs);
@@ -74,25 +70,17 @@ Status TopNNode::prepare(RuntimeState* state) {
     _tuple_row_less_than.reset(
             new TupleRowComparator(_sort_exec_exprs, _is_asc_order, _nulls_first));
 
-    if (state->codegen_level() > 0) {
-        bool success = _tuple_row_less_than->codegen(state);
-        if (success) {
-            // AddRuntimeExecOption("Codegen Enabled");
-        }
-    }
-
     _abort_on_default_limit_exceeded = _abort_on_default_limit_exceeded &&
                                        state->abort_on_default_limit_exceeded();
     _materialized_tuple_desc = _row_descriptor.tuple_descriptors()[0];
-    return Status::OK;
+    return Status::OK();
 }
 
 Status TopNNode::open(RuntimeState* state) {
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     RETURN_IF_ERROR(ExecNode::open(state));
     RETURN_IF_CANCELLED(state);
-    // RETURN_IF_ERROR(QueryMaintenance(state));
-    RETURN_IF_ERROR(state->check_query_state());
+    RETURN_IF_ERROR(state->check_query_state("Top n, before open."));
     RETURN_IF_ERROR(_sort_exec_exprs.open(state));
 
     // Avoid creating them after every Reset()/Open().
@@ -111,23 +99,22 @@ Status TopNNode::open(RuntimeState* state) {
 
     // Limit of 0, no need to fetch anything from children.
     if (_limit != 0) {
-        RowBatch batch(child(0)->row_desc(), state->batch_size(), mem_tracker());
-        bool eos = true;
+        RowBatch batch(child(0)->row_desc(), state->batch_size(), mem_tracker().get());
+        bool eos = false;
 
         do {
             batch.reset();
             RETURN_IF_ERROR(child(0)->get_next(state, &batch, &eos));
 
             if (_abort_on_default_limit_exceeded && child(0)->rows_returned() > _limit) {
-                return Status("DEFAULT_ORDER_BY_LIMIT has been exceeded.");
+                return Status::InternalError("DEFAULT_ORDER_BY_LIMIT has been exceeded.");
             }
 
             for (int i = 0; i < batch.num_rows(); ++i) {
                 insert_tuple_row(batch.get_row(i));
             }
             RETURN_IF_CANCELLED(state);
-            // RETURN_IF_LIMIT_EXCEEDED(state);
-            RETURN_IF_ERROR(state->check_query_state());
+            RETURN_IF_ERROR(state->check_query_state("Top n, while getting next from child 0."));
         } while (!eos);
     }
 
@@ -139,15 +126,14 @@ Status TopNNode::open(RuntimeState* state) {
     // if (!is_in_subplan()) {
     child(0)->close(state);
     // }
-    return Status::OK;
+    return Status::OK();
 }
 
 Status TopNNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) {
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     RETURN_IF_ERROR(exec_debug_action(TExecNodePhase::GETNEXT));
     RETURN_IF_CANCELLED(state);
-    // RETURN_IF_ERROR(QueryMaintenance(state));
-    RETURN_IF_ERROR(state->check_query_state());
+    RETURN_IF_ERROR(state->check_query_state("Top n, before moving result to row_batch."));
 
     while (!row_batch->at_capacity() && (_get_next_iter != _sorted_top_n.end())) {
         if (_num_rows_skipped < _offset) {
@@ -167,7 +153,7 @@ Status TopNNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) {
         COUNTER_SET(_rows_returned_counter, _num_rows_returned);
     }
     if (VLOG_ROW_IS_ON) {
-        VLOG_ROW << "TOPN-node output row: " << print_batch(row_batch);
+        VLOG_ROW << "TOPN-node output row: " << row_batch->to_string();
     }
 
     *eos = _get_next_iter == _sorted_top_n.end();
@@ -177,16 +163,13 @@ Status TopNNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) {
     // block(s) in the pool are all full or when the pool has reached a certain size.
     if (*eos) {
         row_batch->tuple_data_pool()->acquire_data(_tuple_pool.get(), false);
-        if (memory_used_counter() != NULL) {
-            COUNTER_UPDATE(memory_used_counter(), _tuple_pool->peak_allocated_bytes());
-        }
     }
-    return Status::OK;
+    return Status::OK();
 }
 
 Status TopNNode::close(RuntimeState* state) {
     if (is_closed()) {
-        return Status::OK;
+        return Status::OK();
     }
     if (_tuple_pool.get() != NULL) {
         _tuple_pool->free_all();
@@ -265,7 +248,7 @@ void TopNNode::push_down_predicate(
         if ((*iter)->root()->is_bound(&_tuple_ids)) {
             // LOG(INFO) << "push down success expr is " << (*iter)->debug_string();
             // (*iter)->get_child(0)->prepare(state, row_desc());
-            (*iter)->prepare(state, row_desc(), _expr_mem_tracker.get());
+            (*iter)->prepare(state, row_desc(), _expr_mem_tracker);
             (*iter)->open(state);
             _conjunct_ctxs.push_back(*iter);
             iter = expr_ctxs->erase(iter);

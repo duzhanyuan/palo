@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -21,9 +23,12 @@
 #include <unordered_set>
 
 #include "gen_cpp/Types_types.h"
+#include "gutil/ref_counted.h"
 #include "util/hash_util.hpp"
+#include "util/countdown_latch.h"
+#include "util/thread.h"
 
-namespace palo {
+namespace doris {
 
 class ExecEnv;
 
@@ -41,8 +46,9 @@ private:
     std::string _client_id;
     std::mutex _mutex;
     std::unordered_set<TNetworkAddress> _broker_set;
-    bool _thread_stop;
-    std::thread _ping_thread;
+
+    CountDownLatch _stop_background_threads_latch;
+    scoped_refptr<Thread> _ping_thread;
 };
 
 }

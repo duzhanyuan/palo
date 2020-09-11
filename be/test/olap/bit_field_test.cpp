@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -15,15 +17,14 @@
 
 #include <gtest/gtest.h>
 
-#include "olap/column_file/byte_buffer.h"
-#include "olap/column_file/out_stream.h"
-#include "olap/column_file/in_stream.h"
-#include "olap/column_file/bit_field_reader.h"
-#include "olap/column_file/bit_field_writer.h"
+#include "olap/byte_buffer.h"
+#include "olap/out_stream.h"
+#include "olap/in_stream.h"
+#include "olap/rowset/bit_field_reader.h"
+#include "olap/rowset/bit_field_writer.h"
 #include "util/logging.h"
 
-namespace palo {
-namespace column_file {
+namespace doris {
 
 class TestBitField : public testing::Test {
 public:
@@ -34,7 +35,8 @@ public:
     }
     
     void SetUp() {
-        system("rm tmp_file");
+        system("mkdir -p ./ut_dir/");
+        system("rm ./ut_dir/tmp_file");
         _out_stream = new (std::nothrow) OutStream(OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE, NULL);
         ASSERT_TRUE(_out_stream != NULL);
         _writer = new (std::nothrow) BitFieldWriter(_out_stream);
@@ -51,16 +53,16 @@ public:
     }
 
     void CreateReader() {
-        ASSERT_EQ(OLAP_SUCCESS, _helper.open_with_mode("tmp_file", 
+        ASSERT_EQ(OLAP_SUCCESS, _helper.open_with_mode(_file_path.c_str(), 
                 O_CREAT | O_EXCL | O_WRONLY, 
                 S_IRUSR | S_IWUSR));
         _out_stream->write_to_file(&_helper, 0);
         _helper.close();
 
-        ASSERT_EQ(OLAP_SUCCESS, _helper.open_with_mode("tmp_file", 
+        ASSERT_EQ(OLAP_SUCCESS, _helper.open_with_mode(_file_path.c_str(), 
                 O_RDONLY, S_IRUSR | S_IWUSR)); 
 
-        _shared_buffer = ByteBuffer::create(
+        _shared_buffer = StorageByteBuffer::create(
                 OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE + sizeof(StreamHead));
         ASSERT_TRUE(_shared_buffer != NULL);
 
@@ -70,7 +72,8 @@ public:
                 0, 
                 _helper.length(), 
                 NULL, 
-                OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE);
+                OLAP_DEFAULT_COLUMN_STREAM_BUFFER_SIZE,
+                &_stats);
         ASSERT_EQ(OLAP_SUCCESS, _stream->init());
 
         _reader = new (std::nothrow) BitFieldReader(_stream);
@@ -82,8 +85,11 @@ public:
     OutStream* _out_stream;
     BitFieldWriter* _writer;
     FileHandler _helper;
-    ByteBuffer* _shared_buffer;
+    StorageByteBuffer* _shared_buffer;
     ReadOnlyFileStream* _stream;
+    OlapReaderStatistics _stats;
+
+    std::string _file_path = "./ut_dir/tmp_file";
 };
 
 TEST_F(TestBitField, ReadWriteOneBit) {
@@ -147,7 +153,7 @@ TEST_F(TestBitField, Seek) {
     PositionEntryReader entry;
     entry._positions = index_entry._positions;
     entry._positions_count = index_entry._positions_count;
-    entry._statistics.init(OLAP_FIELD_TYPE_NONE, false);
+    entry._statistics.init(OLAP_FIELD_TYPE_TINYINT, false);
 
     PositionProvider position(&entry);
     _reader->seek(&position);
@@ -179,16 +185,15 @@ TEST_F(TestBitField, Skip) {
 }
 
 }
-}
 
 int main(int argc, char** argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    if (!palo::config::init(conffile.c_str(), false)) {
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
         fprintf(stderr, "error read config file. \n");
         return -1;
     }
-    palo::init_glog("be-test");
-    int ret = palo::OLAP_SUCCESS;
+    doris::init_glog("be-test");
+    int ret = doris::OLAP_SUCCESS;
     testing::InitGoogleTest(&argc, argv);
     ret = RUN_ALL_TESTS();
     google::protobuf::ShutdownProtobufLibrary();

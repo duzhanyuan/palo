@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,9 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXPRS_HYBIRD_SET_H
-#define BDG_PALO_BE_SRC_QUERY_EXPRS_HYBIRD_SET_H
+#ifndef DORIS_BE_SRC_QUERY_EXPRS_HYBIRD_SET_H
+#define DORIS_BE_SRC_QUERY_EXPRS_HYBIRD_SET_H
 
+#include <cstring>
 #include <unordered_set>
 #include "common/status.h"
 #include "common/object_pool.h"
@@ -28,8 +26,9 @@
 #include "runtime/string_value.h"
 #include "runtime/datetime_value.h"
 #include "runtime/decimal_value.h"
+#include "runtime/decimalv2_value.h"
 
-namespace palo {
+namespace doris {
 
 class HybirdSetBase {
 public:
@@ -38,6 +37,8 @@ public:
     virtual ~HybirdSetBase() {
     }
     virtual void insert(void* data) = 0;
+
+    virtual void insert(HybirdSetBase* set) = 0;
 
     virtual int size() = 0;
     virtual bool find(void* data) = 0;
@@ -55,7 +56,6 @@ public:
     };
 
     virtual IteratorBase* begin() = 0;
-
 };
 
 template<class T>
@@ -68,7 +68,19 @@ public:
     }
 
     virtual void insert(void* data) {
-        _set.insert(*reinterpret_cast<T*>(data));
+        if (sizeof(T) >= 16) {
+            // for largeint, it will core dump with no memcpy
+            T value;
+            memcpy(&value, data, sizeof(T)); 
+            _set.insert(value);
+        } else {
+            _set.insert(*reinterpret_cast<T*>(data));
+        }
+    }
+
+    virtual void insert(HybirdSetBase* set) {
+        HybirdSet<T>* hybird_set = reinterpret_cast<HybirdSet<T>*>(set);
+        _set.insert(hybird_set->_set.begin(), hybird_set->_set.end());
     }
 
     virtual int size() {
@@ -114,7 +126,9 @@ public:
     IteratorBase* begin() {
         return _pool.add(new(std::nothrow) Iterator<T>(_set.begin(), _set.end()));
     }
+
 private:
+ 
     std::unordered_set<T> _set;
     ObjectPool _pool;
 };
@@ -131,6 +145,11 @@ public:
         StringValue* value = reinterpret_cast<StringValue*>(data);
         std::string str_value(value->ptr, value->len);
         _set.insert(str_value);
+    }
+
+    void insert(HybirdSetBase* set) {
+        StringValueSet* string_set =  reinterpret_cast<StringValueSet*>(set);
+        _set.insert(string_set->_set.begin(), string_set->_set.end());
     }
 
     virtual int size() {
@@ -179,11 +198,13 @@ public:
     IteratorBase* begin() {
         return _pool.add(new(std::nothrow) Iterator(_set.begin(), _set.end()));
     }
+
 private:
+
     std::unordered_set<std::string> _set;
     ObjectPool _pool;
 };
 
 }
 
-#endif  // BDG_PALO_BE_SRC_QUERY_EXPRS_HYBIRD_SET_H
+#endif  // DORIS_BE_SRC_QUERY_EXPRS_HYBIRD_SET_H

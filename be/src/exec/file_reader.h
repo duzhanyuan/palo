@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -24,20 +21,36 @@
 
 #include "common/status.h"
 
-namespace palo {
+namespace doris {
 
 class FileReader {
 public:
     virtual ~FileReader() {
     }
-
+    virtual Status open() = 0;
     // Read content to 'buf', 'buf_len' is the max size of this buffer.
     // Return ok when read success, and 'buf_len' is set to size of read content
     // If reach to end of file, the eof is set to true. meanwhile 'buf_len'
     // is set to zero.
     virtual Status read(uint8_t* buf, size_t* buf_len, bool* eof) = 0;
+    virtual Status readat(int64_t position, int64_t nbytes, int64_t* bytes_read, void* out) = 0;
 
+    /**
+     * This interface is used read a whole message, For example: read a message from kafka.
+     *
+     * if read eof then return Status::OK and length is set 0 and buf is set NULL,
+     *  other return readed bytes.
+     *
+     * !! Important !!
+     * the buf must be deleted by user, otherwise leak memory
+     * !! Important !!
+     */
+    virtual Status read_one_message(uint8_t** buf, size_t* length) = 0;
+    virtual int64_t size () = 0;
+    virtual Status seek(int64_t position) = 0;
+    virtual Status tell(int64_t* position) = 0;
     virtual void close() = 0;
+    virtual bool closed() = 0;
 };
 
 }

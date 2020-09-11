@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -21,11 +23,11 @@
 #include "runtime/exec_env.h"
 #include "util/cpu_info.h"
 
-namespace palo {
+namespace doris {
 // Mock fragment mgr
 Status FragmentMgr::exec_plan_fragment(const TExecPlanFragmentParams& params,
                                        FinishCallback cb) {
-    return Status::OK;
+    return Status::OK();
 }
 
 FragmentMgr::FragmentMgr(ExecEnv* exec_env) :
@@ -67,7 +69,7 @@ TEST_F(EtlJobMgrTest, NormalCase) {
     // make it finishing
     EtlJobResult job_result;
     job_result.file_map["abc"] = 100L;
-    ASSERT_TRUE(mgr.finish_job(id, Status::OK, job_result).ok());
+    ASSERT_TRUE(mgr.finish_job(id, Status::OK(), job_result).ok());
     ASSERT_TRUE(mgr.get_job_state(id, &res).ok());
     ASSERT_EQ(TEtlState::FINISHED, res.etl_state);
     ASSERT_EQ(TStatusCode::OK, res.status.status_code);
@@ -125,7 +127,7 @@ TEST_F(EtlJobMgrTest, RunAfterSuccess) {
     // make it finishing
     EtlJobResult job_result;
     job_result.file_map["abc"] = 100L;
-    ASSERT_TRUE(mgr.finish_job(id, Status::OK, job_result).ok());
+    ASSERT_TRUE(mgr.finish_job(id, Status::OK(), job_result).ok());
     ASSERT_TRUE(mgr.get_job_state(id, &res).ok());
     ASSERT_EQ(TEtlState::FINISHED, res.etl_state);
     ASSERT_EQ(TStatusCode::OK, res.status.status_code);
@@ -160,7 +162,7 @@ TEST_F(EtlJobMgrTest, RunAfterFail) {
     // make it finishing
     EtlJobResult job_result;
     job_result.debug_path = "abc";
-    ASSERT_TRUE(mgr.finish_job(id, Status::THRIFT_RPC_ERROR, job_result).ok());
+    ASSERT_TRUE(mgr.finish_job(id, Status::ThriftRpcError("Thrift rpc error"), job_result).ok());
     ASSERT_TRUE(mgr.get_job_state(id, &res).ok());
     ASSERT_EQ(TEtlState::CANCELLED, res.etl_state);
     ASSERT_EQ(TStatusCode::OK, res.status.status_code);
@@ -214,7 +216,7 @@ TEST_F(EtlJobMgrTest, FinishUnknowJob) {
     // make it finishing
     EtlJobResult job_result;
     job_result.debug_path = "abc";
-    ASSERT_FALSE(mgr.finish_job(id, Status::THRIFT_RPC_ERROR, job_result).ok());
+    ASSERT_FALSE(mgr.finish_job(id, Status::ThriftRpcError("Thrift rpc error"), job_result).ok());
     ASSERT_TRUE(mgr.get_job_state(id, &res).ok());
     ASSERT_EQ(TEtlState::CANCELLED, res.etl_state);
     ASSERT_EQ(TStatusCode::OK, res.status.status_code);
@@ -223,12 +225,12 @@ TEST_F(EtlJobMgrTest, FinishUnknowJob) {
 }
 
 int main(int argc, char** argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    if (!palo::config::init(conffile.c_str(), false)) {
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
         fprintf(stderr, "error read config file. \n");
         return -1;
     }
-    palo::CpuInfo::init();
+    doris::CpuInfo::init();
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

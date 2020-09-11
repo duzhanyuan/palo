@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -28,7 +25,7 @@
 #include "text_converter.h"
 #include "util/string_parser.hpp"
 
-namespace palo {
+namespace doris {
 
 TextConverter::TextConverter(char escape_char)
     : _escape_char(escape_char) {
@@ -40,7 +37,7 @@ void TextConverter::unescape_string(StringValue* value, MemPool* pool) {
     value->ptr = new_data;
 }
 
-void TextConverter::unescape_string(const char* src, char* dest, int* len) {
+void TextConverter::unescape_string(const char* src, char* dest, size_t* len) {
     char* dest_ptr = dest;
     const char* end = src + *len;
     bool escape_next_char = false;

@@ -3,7 +3,6 @@
 #include "gutil/strings/join.h"
 
 #include <common/logging.h>
-#include "gutil/logging-inl.h"
 #include "gutil/gscoped_ptr.h"
 #include "gutil/strings/ascii_ctype.h"
 #include "gutil/strings/escaping.h"
@@ -134,7 +133,7 @@ void JoinMapKeysAndValues(const map<string, string>& components,
                             result);
 }
 
-void JoinVectorKeysAndValues(const vector< pair<string, string> >& components,
+void JoinVectorKeysAndValues(const vector< pair<string, string>>& components,
                              const StringPiece& intra_delim,
                              const StringPiece& inter_delim,
                              string* result) {

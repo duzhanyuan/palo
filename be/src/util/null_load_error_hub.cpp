@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -20,7 +17,7 @@
 
 #include "null_load_error_hub.h"
 
-namespace palo {
+namespace doris {
 
 NullLoadErrorHub::NullLoadErrorHub() {
 }
@@ -30,18 +27,18 @@ NullLoadErrorHub::~NullLoadErrorHub() {
 
 Status NullLoadErrorHub::prepare() {
     _is_valid = true;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status NullLoadErrorHub::export_error(const ErrorMsg& error_msg) {
     std::lock_guard<std::mutex> lock(_mtx);
     ++_total_error_num;
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status NullLoadErrorHub::close() {
-    return Status::OK;
+    return Status::OK();
 }
 
 std::string NullLoadErrorHub::debug_string() const {
@@ -50,5 +47,5 @@ std::string NullLoadErrorHub::debug_string() const {
     return out.str();
 }
 
-} // end namespace palo
+} // end namespace doris
 

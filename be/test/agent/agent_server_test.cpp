@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -28,15 +30,16 @@ using ::testing::SetArgPointee;
 using std::string;
 using std::vector;
 
-namespace palo {
+namespace doris {
 
 TEST(SubmitTasksTest, TestSubmitTasks){
     TAgentResult return_value;
     vector<TAgentTaskRequest> tasks;
     
+    ExecEnv env;
     TMasterInfo master_info;
     TNetworkAddress network_address;
-    AgentServer agent_server(NULL, master_info);
+    AgentServer agent_server(&env, master_info);
     
     // Master info not init
     agent_server.submit_tasks(return_value, tasks);
@@ -55,21 +58,21 @@ TEST(SubmitTasksTest, TestSubmitTasks){
 
     // Master info inited, submit task
     tasks.clear();
-    TAgentTaskRequest create_table_task;
+    TAgentTaskRequest create_tablet_task;
     TCreateTabletReq create_tablet_req;
-    create_table_task.task_type = TTaskType::CREATE;
-    create_table_task.__set_create_tablet_req(create_tablet_req);
-    tasks.push_back(create_table_task);
-    TAgentTaskRequest drop_table_task;
+    create_tablet_task.task_type = TTaskType::CREATE;
+    create_tablet_task.__set_create_tablet_req(create_tablet_req);
+    tasks.push_back(create_tablet_task);
+    TAgentTaskRequest drop_tablet_task;
     TDropTabletReq drop_tablet_req;
-    drop_table_task.task_type = TTaskType::DROP;
-    drop_table_task.__set_drop_tablet_req(drop_tablet_req);
-    tasks.push_back(drop_table_task);
-    TAgentTaskRequest alter_table_task;
+    drop_tablet_task.task_type = TTaskType::DROP;
+    drop_tablet_task.__set_drop_tablet_req(drop_tablet_req);
+    tasks.push_back(drop_tablet_task);
+    TAgentTaskRequest alter_tablet_task;
     TAlterTabletReq alter_tablet_req;
-    alter_table_task.task_type = TTaskType::ROLLUP;
-    alter_table_task.__set_alter_tablet_req(alter_tablet_req);
-    tasks.push_back(alter_table_task);
+    alter_tablet_task.task_type = TTaskType::ROLLUP;
+    alter_tablet_task.__set_alter_tablet_req(alter_tablet_req);
+    tasks.push_back(alter_tablet_task);
     TAgentTaskRequest clone_task;
     TCloneReq clone_req;
     clone_task.task_type = TTaskType::CLONE;
@@ -90,11 +93,6 @@ TEST(SubmitTasksTest, TestSubmitTasks){
     upload_task.task_type = TTaskType::UPLOAD;
     upload_task.__set_upload_req(upload_req);
     tasks.push_back(upload_task);
-    TAgentTaskRequest restore_task;
-    TRestoreReq restore_req;
-    restore_task.task_type = TTaskType::RESTORE;
-    restore_task.__set_restore_req(restore_req);
-    tasks.push_back(restore_task);
     TAgentTaskRequest make_snapshot_task;
     TSnapshotRequest snapshot_req;
     make_snapshot_task.task_type = TTaskType::MAKE_SNAPSHOT;
@@ -119,9 +117,10 @@ TEST(MakeSnapshotTest, TestMakeSnapshot) {
     string snapshot_path;
     TMasterInfo master_info;
 
+    ExecEnv env;
     CommandExecutor* tmp;    
     MockCommandExecutor mock_command_executor;
-    AgentServer agent_server(NULL, master_info);
+    AgentServer agent_server(&env, master_info);
     tmp = agent_server._command_executor;
     agent_server._command_executor = &mock_command_executor;
 
@@ -151,7 +150,8 @@ TEST(ReleaseSnapshotTest, TestReleaseSnapshot) {
 
     CommandExecutor* tmp;    
     MockCommandExecutor mock_command_executor;
-    AgentServer agent_server(NULL, master_info);
+    ExecEnv env;
+    AgentServer agent_server(&env, master_info);
     tmp = agent_server._command_executor;
     agent_server._command_executor = &mock_command_executor;
 
@@ -175,15 +175,15 @@ TEST(ReleaseSnapshotTest, TestReleaseSnapshot) {
     agent_server._command_executor = tmp;
 }
 
-}  // namespace palo
+}  // namespace doris
 
 int main(int argc, char **argv) {
-    std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    if (!palo::config::init(conffile.c_str(), false)) {
+    std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    if (!doris::config::init(conffile.c_str(), false)) {
         fprintf(stderr, "error read config file. \n");
         return -1;
     }
-    palo::init_glog("be-test");
+    doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

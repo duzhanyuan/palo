@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_RUNTIME_DATA_STREAM_SENDER_H
-#define BDG_PALO_BE_RUNTIME_DATA_STREAM_SENDER_H
+#ifndef DORIS_BE_RUNTIME_DATA_STREAM_SENDER_H
+#define DORIS_BE_RUNTIME_DATA_STREAM_SENDER_H
 
 #include <vector>
 #include <string>
@@ -29,14 +26,9 @@
 #include "common/object_pool.h"
 #include "common/status.h"
 #include "util/runtime_profile.h"
-#include "gen_cpp/Data_types.h"  // for TRowBatch
+#include "gen_cpp/data.pb.h"  // for PRowBatch
 
-#include "sender_dispatcher.h"
-#include "rpc/dispatch_handler.h"
-#include "rpc/io_handler.h"
-#include "rpc/poll_event.h"
-
-namespace palo {
+namespace doris {
 
 class ExprContext;
 class RowBatch;
@@ -67,7 +59,7 @@ public:
     DataStreamSender(ObjectPool* pool, int sender_id,
                      const RowDescriptor& row_desc, const TDataStreamSink& sink,
                      const std::vector<TPlanFragmentDestination>& destinations,
-                     int per_channel_buffer_size);
+                     int per_channel_buffer_size, bool send_query_statistics_with_every_batch);
     virtual ~DataStreamSender();
 
     virtual Status init(const TDataSink& thrift_sink);
@@ -94,7 +86,8 @@ public:
     /// Serializes the src batch into the dest thrift batch. Maintains metrics.
     /// num_receivers is the number of receivers this batch will be sent to. Only
     /// used to maintain metrics.
-    Status serialize_batch(RowBatch* src, TRowBatch* dest, int num_receivers = 1);
+    template<class T>
+    Status serialize_batch(RowBatch* src, T* dest, int num_receivers = 1);
 
     // Return total number of bytes sent in TRowBatch.data. If batches are
     // broadcast to multiple receivers, they are counted once per receiver.
@@ -139,13 +132,14 @@ private:
 
     // serialized batches for broadcasting; we need two so we can write
     // one while the other one is still being sent
-    TRowBatch _thrift_batch1;
-    TRowBatch _thrift_batch2;
-    TRowBatch* _current_thrift_batch;  // the next one to fill in send()
+    PRowBatch _pb_batch1;
+    PRowBatch _pb_batch2;
+    PRowBatch* _current_pb_batch = nullptr;
 
     std::vector<ExprContext*> _partition_expr_ctxs;  // compute per-row partition values
 
     std::vector<Channel*> _channels;
+    std::vector<std::shared_ptr<Channel>> _channel_shared_ptrs;
 
     // map from range value to partition_id
     // sorted in ascending orderi by range for binary search
@@ -153,15 +147,11 @@ private:
 
     RuntimeProfile* _profile; // Allocated from _pool
     RuntimeProfile::Counter* _serialize_batch_timer;
-    RuntimeProfile::Counter* _thrift_transmit_timer;
     RuntimeProfile::Counter* _bytes_sent_counter;
     RuntimeProfile::Counter* _uncompressed_bytes_counter;
     RuntimeProfile::Counter* _ignore_rows;
 
-    std::unique_ptr<MemTracker> _mem_tracker;
-
-    // Throughput per time spent in TransmitData
-    RuntimeProfile::Counter* _network_throughput;
+    std::shared_ptr<MemTracker> _mem_tracker;
 
     // Throughput per total time spent in sender
     RuntimeProfile::Counter* _overall_throughput;

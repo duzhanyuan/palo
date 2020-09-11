@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_UTIL_FILESYSTEM_UTIL_H
-#define BDG_PALO_BE_SRC_UTIL_FILESYSTEM_UTIL_H
+#ifndef DORIS_BE_SRC_UTIL_FILESYSTEM_UTIL_H
+#define DORIS_BE_SRC_UTIL_FILESYSTEM_UTIL_H
 
 #include "common/status.h"
 
-namespace palo {
+namespace doris {
 
 // Utility class for common local file system operations such as file creation and
 // deletion. This class should NOT be used to read or write data (DiskIoMgr is used
@@ -33,7 +30,7 @@ class FileSystemUtil {
 public:
     // Create the specified directory and any ancestor directories that do not exist yet.
     // The directory and its contents are destroyed if it already exists.
-    // Returns Status::OK if successful, or a runtime error with a message otherwise.
+    // Returns Status::OK() if successful, or a runtime error with a message otherwise.
     static Status create_directory(const std::string& directory);
 
     // Create a file at the specified path.
@@ -46,7 +43,7 @@ public:
     static Status remove_paths(const std::vector<std::string>& directories);
 
     // Verify that the specified path is an existing directory.
-    // Returns Status::OK if it is, or a runtime error with a message otherwise.
+    // Returns Status::OK() if it is, or a runtime error with a message otherwise.
     static Status verify_is_directory(const std::string& directory_path);
 
     // Returns the space available on the file system containing 'directory_path'

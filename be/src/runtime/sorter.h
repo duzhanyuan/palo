@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_RUNTIME_SORTER_H
-#define BDG_PALO_BE_RUNTIME_SORTER_H
+#ifndef DORIS_BE_RUNTIME_SORTER_H
+#define DORIS_BE_RUNTIME_SORTER_H
 
 #include "common/status.h"
 
-namespace palo {
+namespace doris {
 
 class RowBatch;
 class RuntimeState;
@@ -38,12 +35,12 @@ public:
     }
 
     virtual Status prepare(RuntimeState* state) {
-        return Status::OK;
+        return Status::OK();
     }
 
     // Add data to be sorted.
     virtual Status add_batch(RowBatch* batch) {
-        return Status::OK;
+        return Status::OK();
     }
 
     // call when all data be added
@@ -54,7 +51,7 @@ public:
     virtual Status get_next(RowBatch* batch, bool* eos) = 0;
 
     virtual Status close(RuntimeState* state) {
-        return Status::OK;
+        return Status::OK();
     }
 };
 

@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_RUNTIME_STRING_VALUE_H
-#define BDG_PALO_BE_RUNTIME_STRING_VALUE_H
+#ifndef DORIS_BE_RUNTIME_STRING_VALUE_H
+#define DORIS_BE_RUNTIME_STRING_VALUE_H
 
 #include <string.h>
 
 #include "udf/udf.h"
 #include "util/hash_util.hpp"
 
-namespace palo {
+namespace doris {
 
 // The format of a string-typed slot.
 // The returned StringValue of all functions that return StringValue
@@ -36,8 +33,11 @@ struct StringValue {
     // TODO: change ptr to an offset relative to a contiguous memory block,
     // so that we can send row batches between nodes without having to swizzle
     // pointers
+    // NOTE: This struct should keep the same memory layout with Slice, otherwise
+    // it will lead to BE crash.
+    // TODO(zc): we should unify this struct with Slice some day.
     char* ptr;
-    int len;
+    size_t len;
 
     StringValue(char* ptr, int len): ptr(ptr), len(len) {}
     StringValue(): ptr(NULL), len(0) {}
@@ -108,6 +108,8 @@ struct StringValue {
 
     std::string debug_string() const;
 
+    std::string to_string() const;
+
     // Returns the substring starting at start_pos until the end of string.
     StringValue substring(int start_pos) const;
 
@@ -118,16 +120,13 @@ struct StringValue {
     // Trims leading and trailing spaces.
     StringValue trim() const;
 
-    void to_string_val(palo_udf::StringVal* sv) const {
-        *sv = palo_udf::StringVal(reinterpret_cast<uint8_t*>(ptr), len);
+    void to_string_val(doris_udf::StringVal* sv) const {
+        *sv = doris_udf::StringVal(reinterpret_cast<uint8_t*>(ptr), len);
     }
 
-    static StringValue from_string_val(const palo_udf::StringVal& sv) {
+    static StringValue from_string_val(const doris_udf::StringVal& sv) {
         return StringValue(reinterpret_cast<char*>(sv.ptr), sv.len);
     }
-
-    // For C++/IR interop, we need to be able to look up types by name.
-    static const char* s_llvm_class_name;
 };
 
 // This function must be called 'hash_value' to be picked up by boost.

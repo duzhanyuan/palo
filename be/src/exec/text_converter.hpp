@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,14 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_QUERY_EXEC_TEXT_CONVERTER_HPP
-#define BDG_PALO_BE_SRC_QUERY_EXEC_TEXT_CONVERTER_HPP
+#ifndef DORIS_BE_SRC_QUERY_EXEC_TEXT_CONVERTER_HPP
+#define DORIS_BE_SRC_QUERY_EXEC_TEXT_CONVERTER_HPP
 
 #include "text_converter.h"
 
 #include <boost/algorithm/string.hpp>
 
 #include "runtime/decimal_value.h"
+#include "runtime/decimalv2_value.h"
 #include "runtime/descriptors.h"
 #include "runtime/mem_pool.h"
 #include "runtime/runtime_state.h"
@@ -33,9 +31,10 @@
 #include "runtime/datetime_value.h"
 #include "runtime/tuple.h"
 #include "util/string_parser.hpp"
+#include "util/types.h"
 #include "olap/utils.h"
 
-namespace palo {
+namespace doris {
 
 // Note: this function has a codegen'd version.  Changing this function requires
 // corresponding changes to CodegenWriteSlot.
@@ -108,10 +107,11 @@ inline bool TextConverter::write_slot(const SlotDescriptor* slot_desc,
             StringParser::string_to_int<int64_t>(data, len, &parse_result);
         break;
 
-    case TYPE_LARGEINT:
-        *reinterpret_cast<__int128*>(slot) =
-            StringParser::string_to_int<__int128>(data, len, &parse_result);
+    case TYPE_LARGEINT: {
+        __int128 tmp = StringParser::string_to_int<__int128>(data, len, &parse_result);
+        memcpy(slot, &tmp, sizeof(tmp));
         break;
+    }
 
     case TYPE_FLOAT:
         *reinterpret_cast<float*>(slot) =
@@ -129,11 +129,6 @@ inline bool TextConverter::write_slot(const SlotDescriptor* slot_desc,
             parse_result = StringParser::PARSE_FAILURE;
             break;
         }
-        // For compatibility with DPP, which only support years after 1900 
-        if (ts_slot->year() < 1900) {
-            parse_result = StringParser::PARSE_FAILURE;
-            break;
-        }
 
         ts_slot->cast_to_date();
         break;
@@ -143,11 +138,6 @@ inline bool TextConverter::write_slot(const SlotDescriptor* slot_desc,
         DateTimeValue* ts_slot = reinterpret_cast<DateTimeValue*>(slot);
         if (!ts_slot->from_date_str(data, len)) {
             parse_result = StringParser::PARSE_FAILURE;
-        }
-        // For compatibility with DPP, which only support years after 1900 
-        if (ts_slot->year() < 1900) {
-            parse_result = StringParser::PARSE_FAILURE;
-            break;
         }
 
         ts_slot->to_datetime();
@@ -160,6 +150,19 @@ inline bool TextConverter::write_slot(const SlotDescriptor* slot_desc,
         if (decimal_slot->parse_from_str(data, len)) {
             parse_result = StringParser::PARSE_FAILURE;
         }
+
+        break;
+    }
+
+    case TYPE_DECIMALV2: {
+        DecimalV2Value decimal_slot;
+
+        if (decimal_slot.parse_from_str(data, len)) {
+            parse_result = StringParser::PARSE_FAILURE;
+        }
+
+        *reinterpret_cast<PackedInt128*>(slot) = 
+            *reinterpret_cast<const PackedInt128*>(&decimal_slot);
 
         break;
     }

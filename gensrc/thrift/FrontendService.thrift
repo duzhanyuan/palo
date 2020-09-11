@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-namespace cpp palo
-namespace java com.baidu.palo.thrift
+namespace cpp doris
+namespace java org.apache.doris.thrift
 
 include "Status.thrift"
 include "Types.thrift"
@@ -66,7 +63,9 @@ struct TColumnDef {
 struct TDescribeTableParams {
   1: optional string db
   2: required string table_name
-  3: optional string user
+  3: optional string user   // deprecated
+  4: optional string user_ip    // deprecated
+  5: optional Types.TUserIdentity current_user_ident // to replace the user and user ip
 }
 
 // Results of a call to describeTable()
@@ -281,7 +280,9 @@ struct TExecRequest {
 struct TGetDbsParams {
   // If not set, match every database
   1: optional string pattern
-  2: optional string user
+  2: optional string user   // deprecated
+  3: optional string user_ip    // deprecated
+  4: optional Types.TUserIdentity current_user_ident // to replace the user and user ip
 }
 
 // getDbNames returns a list of database names
@@ -297,7 +298,9 @@ struct TGetTablesParams {
 
   // If not set, match every table
   2: optional string pattern 
-  3: optional string user 
+  3: optional string user   // deprecated
+  4: optional string user_ip    // deprecated
+  5: optional Types.TUserIdentity current_user_ident // to replace the user and user ip
 }
 
 struct TTableStatus {
@@ -305,6 +308,8 @@ struct TTableStatus {
     2: required string type
     3: required string comment
     4: optional string engine
+    5: optional i64 last_check_time
+    6: optional i64 create_time
 }
 
 struct TListTableStatusResult {
@@ -365,6 +370,12 @@ struct TReportExecStatusParams {
 
   // export files
   13: optional list<string> export_files 
+
+  14: optional list<Types.TTabletCommitInfo> commitInfos
+
+  15: optional i64 loaded_rows
+
+  16: optional i64 backend_id
 }
 
 struct TFeResult {
@@ -386,6 +397,8 @@ struct TMiniLoadRequest {
     9: optional string subLabel
     10: optional string cluster
     11: optional i64 timestamp
+    12: optional string user_ip
+    13: optional bool is_retry
 }
 
 struct TUpdateMiniEtlTaskStatusRequest {
@@ -400,6 +413,18 @@ struct TMasterOpRequest {
     3: required string sql 
     4: optional Types.TResourceInfo resourceInfo
     5: optional string cluster
+    6: optional i64 execMemLimit // deprecated, move into query_options
+    7: optional i32 queryTimeout // deprecated, move into query_options
+    8: optional string user_ip
+    9: optional string time_zone
+    10: optional i64 stmt_id
+    11: optional i64 sqlMode
+    12: optional i64 loadMemLimit // deprecated, move into query_options
+    13: optional bool enableStrictMode
+    // this can replace the "user" field
+    14: optional Types.TUserIdentity current_user_ident
+    15: optional i32 stmtIdx  // the idx of the sql in multi statements
+    16: optional PaloInternalService.TQueryOptions query_options
 }
 
 struct TColumnDefinition {
@@ -432,12 +457,184 @@ struct TLoadCheckRequest {
     5: optional string label
     6: optional string cluster
     7: optional i64 timestamp
+    8: optional string user_ip
+    9: optional string tbl
+}
+
+struct TMiniLoadBeginRequest {
+    1: required string user
+    2: required string passwd
+    3: optional string cluster
+    4: optional string user_ip
+    5: required string db
+    6: required string tbl
+    7: required string label
+    8: optional string sub_label
+    9: optional i64 timeout_second
+    10: optional double max_filter_ratio 
+    11: optional i64 auth_code
+    12: optional i64 create_timestamp
+    13: optional Types.TUniqueId request_id
+}
+
+struct TIsMethodSupportedRequest {
+    1: optional string function_name
+}
+
+struct TMiniLoadBeginResult {
+    1: required Status.TStatus status
+    2: optional i64 txn_id
 }
 
 struct TUpdateExportTaskStatusRequest {
     1: required FrontendServiceVersion protocolVersion
     2: required Types.TUniqueId taskId
     3: required PaloInternalService.TExportStatusResult taskStatus
+}
+
+struct TLoadTxnBeginRequest {
+    1: optional string cluster
+    2: required string user
+    3: required string passwd
+    4: required string db
+    5: required string tbl
+    6: optional string user_ip
+    7: required string label
+    8: optional i64 timestamp   // deprecated, use request_id instead
+    9: optional i64 auth_code
+    // The real value of timeout should be i32. i64 ensures the compatibility of interface.
+    10: optional i64 timeout
+    11: optional Types.TUniqueId request_id
+}
+
+struct TLoadTxnBeginResult {
+    1: required Status.TStatus status
+    2: optional i64 txnId
+    3: optional string job_status // if label already used, set status of existing job
+}
+
+// StreamLoad request, used to load a streaming to engine
+struct TStreamLoadPutRequest {
+    1: optional string cluster
+    2: required string user
+    3: required string passwd
+    4: required string db
+    5: required string tbl
+    6: optional string user_ip
+
+    // and use this to assgin to OlapTableSink
+    7: required Types.TUniqueId loadId
+    8: required i64 txnId
+
+    9: required Types.TFileType fileType
+    10: required PlanNodes.TFileFormatType formatType
+
+    // only valid when file_type is FILE_LOCAL
+    11: optional string path
+
+    // describe how table's column map to field in source file
+    // slot descriptor stands for field of source file
+    12: optional string columns
+    // filters that applied on data
+    13: optional string where
+    // only valid when file type is CSV
+    14: optional string columnSeparator
+
+    15: optional string partitions
+    16: optional i64 auth_code
+    17: optional bool negative
+    18: optional i32 timeout
+    19: optional bool strictMode
+    20: optional string timezone
+    21: optional i64 execMemLimit
+    22: optional bool isTempPartition
+    23: optional bool strip_outer_array
+    24: optional string jsonpaths
+    25: optional i64 thrift_rpc_timeout_ms
+    26: optional string json_root
+    27: optional Types.TMergeType merge_type
+    28: optional string delete_condition
+    29: optional string sequence_col
+}
+
+struct TStreamLoadPutResult {
+    1: required Status.TStatus status
+    // valid when status is OK
+    2: optional PaloInternalService.TExecPlanFragmentParams params
+}
+
+struct TKafkaRLTaskProgress {
+    1: required map<i32,i64> partitionCmtOffset
+}
+
+struct TRLTaskTxnCommitAttachment {
+    1: required Types.TLoadSourceType loadSourceType
+    2: required Types.TUniqueId id
+    3: required i64 jobId
+    4: optional i64 loadedRows
+    5: optional i64 filteredRows
+    6: optional i64 unselectedRows
+    7: optional i64 receivedBytes
+    8: optional i64 loadedBytes
+    9: optional i64 loadCostMs
+    10: optional TKafkaRLTaskProgress kafkaRLTaskProgress
+    11: optional string errorLogUrl
+}
+
+struct TMiniLoadTxnCommitAttachment {
+    1: required i64 loadedRows
+    2: required i64 filteredRows
+    3: optional string errorLogUrl
+} 
+
+struct TTxnCommitAttachment {
+    1: required Types.TLoadType loadType
+    2: optional TRLTaskTxnCommitAttachment rlTaskTxnCommitAttachment
+    3: optional TMiniLoadTxnCommitAttachment mlTxnCommitAttachment 
+}
+
+struct TLoadTxnCommitRequest {
+    1: optional string cluster
+    2: required string user
+    3: required string passwd
+    4: required string db
+    5: required string tbl
+    6: optional string user_ip
+    7: required i64 txnId
+    8: required bool sync
+    9: optional list<Types.TTabletCommitInfo> commitInfos
+    10: optional i64 auth_code
+    11: optional TTxnCommitAttachment txnCommitAttachment
+    12: optional i64 thrift_rpc_timeout_ms
+}
+
+struct TLoadTxnCommitResult {
+    1: required Status.TStatus status
+}
+
+struct TLoadTxnRollbackRequest {
+    1: optional string cluster
+    2: required string user
+    3: required string passwd
+    4: required string db
+    5: required string tbl
+    6: optional string user_ip
+    7: required i64 txnId
+    8: optional string reason
+    9: optional i64 auth_code
+    10: optional TTxnCommitAttachment txnCommitAttachment
+}
+
+struct TLoadTxnRollbackResult {
+    1: required Status.TStatus status
+}
+
+struct TSnapshotLoaderReportRequest {
+    1: required i64 job_id
+    2: required i64 task_id
+    3: required Types.TTaskType task_type
+    4: optional i32 finished_num
+    5: optional i32 total_num
 }
 
 service FrontendService {
@@ -450,13 +647,26 @@ service FrontendService {
     MasterService.TMasterResult finishTask(1:MasterService.TFinishTaskRequest request)
     MasterService.TMasterResult report(1:MasterService.TReportRequest request)
     MasterService.TFetchResourceResult fetchResource()
+    
+    // those three method are used for asynchronous mini load which will be abandoned
     TFeResult miniLoad(1:TMiniLoadRequest request)
     TFeResult updateMiniEtlTaskStatus(1:TUpdateMiniEtlTaskStatusRequest request)
     TFeResult loadCheck(1:TLoadCheckRequest request)
+    // this method is used for streaming mini load
+    TMiniLoadBeginResult miniLoadBegin(TMiniLoadBeginRequest request)
+    TFeResult isMethodSupported(TIsMethodSupportedRequest request)
 
     TMasterOpResult forward(TMasterOpRequest params)
 
     TListTableStatusResult listTableStatus(1:TGetTablesParams params)
 
     TFeResult updateExportTaskStatus(1:TUpdateExportTaskStatusRequest request)
+
+    TLoadTxnBeginResult loadTxnBegin(1: TLoadTxnBeginRequest request)
+    TLoadTxnCommitResult loadTxnCommit(1: TLoadTxnCommitRequest request)
+    TLoadTxnRollbackResult loadTxnRollback(1: TLoadTxnRollbackRequest request)
+
+    TStreamLoadPutResult streamLoadPut(1: TStreamLoadPutRequest request)
+
+    Status.TStatus snapshotLoaderReport(1: TSnapshotLoaderReportRequest request)
 }

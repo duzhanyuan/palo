@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -19,28 +16,30 @@
 // under the License.
 
 #include "udf/udf.h"
+#include "common/logging.h"
+#include "olap/hll.h"
 
 #include <iostream>
 #include <sstream>
 #include <assert.h>
 
 #include "runtime/decimal_value.h"
+#include "runtime/decimalv2_value.h"
 
 // Be careful what this includes since this needs to be linked into the UDF's
 // binary. For example, it would be unfortunate if they had a random dependency
 // on libhdfs.
 #include "udf/udf_internal.h"
-#include "common/logging.h"
 #include "util/debug_util.h"
 
-#if PALO_UDF_SDK_BUILD
+#if DORIS_UDF_SDK_BUILD
 // For the SDK build, we are building the .lib that the developers would use to
 // write UDFs. They want to link against this to run their UDFs in a test environment.
 // Pulling in free-pool is very undesirable since it pulls in many other libraries.
 // Instead, we'll implement a dummy version that is not used.
 // When they build their library to a .so, they'd use the version of FunctionContext
 // in the main binary, which does include FreePool.
-namespace palo {
+namespace doris {
 class FreePool {
 public:
     FreePool(MemPool*) { }
@@ -69,9 +68,12 @@ public:
         return false;
     }
 
-    const std::string user() const {
-        return "";
+    const std::string& user() const {
+        return _user;
     }
+
+private:
+    std::string _user = "";
 };
 }
 #else
@@ -79,11 +81,9 @@ public:
 #include "runtime/runtime_state.h"
 #endif
 
-namespace palo {
+namespace doris {
 
-const char* FunctionContextImpl::_s_llvm_functioncontext_name = "class.palo_udf::FunctionContext";
-
-FunctionContextImpl::FunctionContextImpl(palo_udf::FunctionContext* parent) : 
+FunctionContextImpl::FunctionContextImpl(doris_udf::FunctionContext* parent) : 
         _varargs_buffer(nullptr),
         _varargs_buffer_size(0),
         _num_updates(0),
@@ -92,7 +92,7 @@ FunctionContextImpl::FunctionContextImpl(palo_udf::FunctionContext* parent) :
         _pool(NULL),
         _state(NULL),
         _debug(false),
-        _version(palo_udf::FunctionContext::V2_0),
+        _version(doris_udf::FunctionContext::V2_0),
         _num_warnings(0),
         _thread_local_fn_state(nullptr),
         _fragment_local_fn_state(nullptr),
@@ -122,7 +122,7 @@ void FunctionContextImpl::close() {
     _closed = true;
 }
 
-uint8_t* FunctionContextImpl::allocate_local(int byte_size) {
+uint8_t* FunctionContextImpl::allocate_local(int64_t byte_size) {
     uint8_t* buffer = _pool->allocate(byte_size);
     _local_allocations.push_back(buffer);
     return buffer;
@@ -136,7 +136,7 @@ void FunctionContextImpl::free_local_allocations() {
     _local_allocations.clear();
 }
 
-void FunctionContextImpl::set_constant_args(const std::vector<palo_udf::AnyVal*>& constant_args) {
+void FunctionContextImpl::set_constant_args(const std::vector<doris_udf::AnyVal*>& constant_args) {
     _constant_args = constant_args;
 }
 
@@ -160,13 +160,13 @@ bool FunctionContextImpl::check_local_allocations_empty() {
     return false;
 }
 
-palo_udf::FunctionContext* FunctionContextImpl::create_context(
+doris_udf::FunctionContext* FunctionContextImpl::create_context(
         RuntimeState* state, MemPool* pool,
-        const palo_udf::FunctionContext::TypeDesc& return_type,
-        const std::vector<palo_udf::FunctionContext::TypeDesc>& arg_types,
+        const doris_udf::FunctionContext::TypeDesc& return_type,
+        const std::vector<doris_udf::FunctionContext::TypeDesc>& arg_types,
         int varargs_buffer_size, bool debug) {
-    palo_udf::FunctionContext::TypeDesc invalid_type;
-    invalid_type.type = palo_udf::FunctionContext::INVALID_TYPE;
+    doris_udf::FunctionContext::TypeDesc invalid_type;
+    invalid_type.type = doris_udf::FunctionContext::INVALID_TYPE;
     invalid_type.precision = 0;
     invalid_type.scale = 0;
     return FunctionContextImpl::create_context(
@@ -174,13 +174,13 @@ palo_udf::FunctionContext* FunctionContextImpl::create_context(
             arg_types, varargs_buffer_size, debug);
 }
 
-palo_udf::FunctionContext* FunctionContextImpl::create_context(
+doris_udf::FunctionContext* FunctionContextImpl::create_context(
         RuntimeState* state, MemPool* pool,
-        const palo_udf::FunctionContext::TypeDesc& intermediate_type,
-        const palo_udf::FunctionContext::TypeDesc& return_type,
-        const std::vector<palo_udf::FunctionContext::TypeDesc>& arg_types,
+        const doris_udf::FunctionContext::TypeDesc& intermediate_type,
+        const doris_udf::FunctionContext::TypeDesc& return_type,
+        const std::vector<doris_udf::FunctionContext::TypeDesc>& arg_types,
         int varargs_buffer_size, bool debug) {
-    palo_udf::FunctionContext* ctx = new palo_udf::FunctionContext();
+    doris_udf::FunctionContext* ctx = new doris_udf::FunctionContext();
     ctx->_impl->_state = state;
     ctx->_impl->_pool = new FreePool(pool);
     ctx->_impl->_intermediate_type = intermediate_type;
@@ -200,7 +200,7 @@ palo_udf::FunctionContext* FunctionContextImpl::create_context(
 }
 
 FunctionContext* FunctionContextImpl::clone(MemPool* pool) {
-    palo_udf::FunctionContext* new_context =
+    doris_udf::FunctionContext* new_context =
         create_context(_state, pool, _intermediate_type, _return_type, _arg_types,
                       _varargs_buffer_size, _debug);
     new_context->_impl->_constant_args = _constant_args;
@@ -210,18 +210,18 @@ FunctionContext* FunctionContextImpl::clone(MemPool* pool) {
 
 }
 
-namespace palo_udf {
+namespace doris_udf {
 static const int MAX_WARNINGS = 1000;
 
 FunctionContext* FunctionContext::create_test_context() {
     FunctionContext* context = new FunctionContext();
     context->impl()->_debug = true;
     context->impl()->_state = NULL;
-    context->impl()->_pool = new palo::FreePool(NULL);
+    context->impl()->_pool = new doris::FreePool(NULL);
     return context;
 }
 
-FunctionContext::FunctionContext() : _impl(new palo::FunctionContextImpl(this)) {
+FunctionContext::FunctionContext() : _impl(new doris::FunctionContextImpl(this)) {
 }
 
 FunctionContext::~FunctionContext() {
@@ -233,7 +233,7 @@ FunctionContext::~FunctionContext() {
     delete _impl;
 }
 
-FunctionContext::PaloVersion FunctionContext::version() const {
+FunctionContext::DorisVersion FunctionContext::version() const {
     return _impl->_version;
 }
 
@@ -247,7 +247,7 @@ const char* FunctionContext::user() const {
 
 FunctionContext::UniqueId FunctionContext::query_id() const {
     UniqueId id;
-#if PALO_UDF_SDK_BUILD
+#if DORIS_UDF_SDK_BUILD
     id.hi = id.lo = 0;
 #else
     id.hi = _impl->_state->query_id().hi;
@@ -265,7 +265,7 @@ const char* FunctionContext::error_msg() const {
         return _impl->_error_msg.c_str();
     }
 
-    return NULL;
+    return nullptr;
 }
 
 uint8_t* FunctionContext::allocate(int byte_size) {  
@@ -339,10 +339,14 @@ void FunctionContext::set_error(const char* error_msg) {
         std::stringstream ss;
         ss << "UDF ERROR: " << error_msg;
 
-        if (_impl->_state != NULL) {
+        if (_impl->_state != nullptr) {
             _impl->_state->set_process_status(ss.str());
         }
     }
+}
+
+void FunctionContext::clear_error_msg() {
+    _impl->_error_msg.clear();
 }
 
 bool FunctionContext::add_warning(const char* warning_msg) {
@@ -361,9 +365,29 @@ bool FunctionContext::add_warning(const char* warning_msg) {
     }
 }
 
-StringVal::StringVal(FunctionContext* context, int len) : 
-        len(len), 
+StringVal::StringVal(FunctionContext* context, int64_t len) :
+        len(len),
         ptr(context->impl()->allocate_local(len)) {
+}
+
+bool StringVal::resize(FunctionContext* ctx, int64_t new_len) {
+    if (new_len <= len) {
+        len = new_len;
+        return true;
+    }
+    if (UNLIKELY(new_len > StringVal::MAX_LENGTH)) {
+        len = 0;
+        is_null = true;
+        return false;
+    }
+    auto* new_ptr = ctx->impl()->allocate_local(new_len);
+    if (new_ptr != nullptr) {
+        memcpy(new_ptr, ptr, len);
+        ptr = new_ptr;
+        len = new_len;
+        return true;
+    }
+    return false;
 }
 
 StringVal StringVal::copy_from(FunctionContext* ctx, const uint8_t* buf, size_t len) {
@@ -374,7 +398,7 @@ StringVal StringVal::copy_from(FunctionContext* ctx, const uint8_t* buf, size_t 
     return result;
 }
 
-StringVal StringVal::create_temp_string_val(FunctionContext* ctx, int len) {
+StringVal StringVal::create_temp_string_val(FunctionContext* ctx, int64_t len) {
     ctx->impl()->string_result().resize(len);
     return StringVal((uint8_t*)ctx->impl()->string_result().c_str(), len);
 }
@@ -393,6 +417,7 @@ void StringVal::append(FunctionContext* ctx, const uint8_t* buf, size_t buf_len)
         len += buf_len;
     }
 }
+
 void StringVal::append(FunctionContext* ctx, const uint8_t* buf, size_t buf_len,
     const uint8_t* buf2, size_t buf2_len) {
     if (UNLIKELY(len + buf_len + buf2_len > StringVal::MAX_LENGTH)) {
@@ -420,8 +445,8 @@ bool DecimalVal::operator==(const DecimalVal& other) const {
     }
 
     // TODO(lingbin): implement DecimalVal's own cmp method 
-    palo::DecimalValue value1 = palo::DecimalValue::from_decimal_val(*this);
-    palo::DecimalValue value2 = palo::DecimalValue::from_decimal_val(other);
+    doris::DecimalValue value1 = doris::DecimalValue::from_decimal_val(*this);
+    doris::DecimalValue value2 = doris::DecimalValue::from_decimal_val(other);
     return value1 == value2;
 }
 
@@ -430,6 +455,71 @@ const FunctionContext::TypeDesc* FunctionContext::get_arg_type(int arg_idx) cons
         return NULL;
     }
     return &_impl->_arg_types[arg_idx];
+}
+
+void HllVal::init(FunctionContext* ctx) {
+    len = doris::HLL_COLUMN_DEFAULT_LEN;
+    ptr = ctx->allocate(len);
+    memset(ptr, 0, len);
+    // the HLL type is HLL_DATA_FULL in UDF or UDAF
+    ptr[0] = doris::HllDataType::HLL_DATA_FULL;
+
+    is_null = false;
+}
+
+void HllVal::agg_parse_and_cal(FunctionContext* ctx, const HllVal& other) {
+    doris::HllSetResolver resolver;
+
+    // zero size means the src input is a HyperLogLog object
+    if (other.len == 0) {
+        auto* hll = reinterpret_cast<doris::HyperLogLog*>(other.ptr);
+        uint8_t* other_ptr = ctx->allocate(doris::HLL_COLUMN_DEFAULT_LEN);
+        int other_len = hll->serialize(ptr);
+        resolver.init((char*)other_ptr, other_len);
+    } else {
+        resolver.init((char*)other.ptr, other.len);
+    }
+
+    resolver.parse();
+
+    if (resolver.get_hll_data_type() == doris::HLL_DATA_EMPTY) {
+        return;
+    }
+
+    uint8_t* pdata = ptr + 1;
+    int data_len = doris::HLL_REGISTERS_COUNT;
+
+    if (resolver.get_hll_data_type() == doris::HLL_DATA_EXPLICIT) {
+        for (int i = 0; i < resolver.get_explicit_count(); i++) {
+            uint64_t hash_value = resolver.get_explicit_value(i);
+            int idx = hash_value % data_len;
+            uint8_t first_one_bit = __builtin_ctzl(hash_value >> doris::HLL_COLUMN_PRECISION) + 1;
+            pdata[idx] = std::max(pdata[idx], first_one_bit);
+        }
+    } else if (resolver.get_hll_data_type() == doris::HLL_DATA_SPRASE) {
+        std::map<doris::HllSetResolver::SparseIndexType,
+                 doris::HllSetResolver::SparseValueType>&
+                     sparse_map = resolver.get_sparse_map();
+        for (std::map<doris::HllSetResolver::SparseIndexType,
+                doris::HllSetResolver::SparseValueType>::iterator iter = sparse_map.begin();
+                                    iter != sparse_map.end(); iter++) {
+            pdata[iter->first] = std::max(pdata[iter->first], (uint8_t)iter->second);
+        }
+    } else if (resolver.get_hll_data_type() == doris::HLL_DATA_FULL) {
+        char* full_value = resolver.get_full_value();
+        for (int i = 0; i < doris::HLL_REGISTERS_COUNT; i++) {
+            pdata[i] = std::max(pdata[i], (uint8_t)full_value[i]);
+        }
+    }
+}
+
+void HllVal::agg_merge(const HllVal &other) {
+    uint8_t* pdata = ptr + 1;
+    uint8_t* pdata_other = other.ptr + 1;
+
+    for (int i = 0; i < doris::HLL_REGISTERS_COUNT; ++i) {
+        pdata[i] = std::max(pdata[i], pdata_other[i]);
+    }
 }
 
 }

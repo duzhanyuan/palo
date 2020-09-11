@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -22,12 +19,12 @@
 
 #include <boost/scoped_ptr.hpp>
 
-#include "codegen/palo_ir.h"
+#include "codegen/doris_ir.h"
 #include "exec/exec_node.h"
 #include "runtime/row_batch.h"
 #include "runtime/runtime_state.h"
 
-namespace palo {
+namespace doris {
 
 class DescriptorTbl;
 class ExprContext;
@@ -46,9 +43,8 @@ class UnionNode : public ExecNode {
 public:
     UnionNode(ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs);
 
-    virtual Status init(const TPlanNode& tnode);
+    virtual Status init(const TPlanNode& tnode, RuntimeState* state = nullptr);
     virtual Status prepare(RuntimeState* state);
-    virtual void codegen(RuntimeState* state);
     virtual Status open(RuntimeState* state);
     virtual Status get_next(RuntimeState* state, RowBatch* row_batch, bool* eos);
     // virtual Status reset(RuntimeState* state);
@@ -129,6 +125,8 @@ private:
     /// and appends the new tuple to 'dst_batch'. Increments '_num_rows_returned'.
     void materialize_exprs(const std::vector<ExprContext*>& exprs,
                            TupleRow* row, uint8_t* tuple_buf, RowBatch* dst_batch);
+
+    Status get_error_msg(const std::vector<ExprContext*>& exprs);
 
     /// Returns true if the child at 'child_idx' can be passed through.
     bool is_child_passthrough(int child_idx) const {

@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_RUNTIME_BUFFERED_BLOCK_MGR2_H
-#define BDG_PALO_BE_SRC_RUNTIME_BUFFERED_BLOCK_MGR2_H
+#ifndef DORIS_BE_SRC_RUNTIME_BUFFERED_BLOCK_MGR2_H
+#define DORIS_BE_SRC_RUNTIME_BUFFERED_BLOCK_MGR2_H
 
 #include <boost/ptr_container/ptr_vector.hpp>
 #include <boost/scoped_array.hpp>
@@ -29,7 +26,7 @@
 #include "runtime/disk_io_mgr.h"
 #include "runtime/tmp_file_mgr.h"
 
-namespace palo {
+namespace doris {
 
 class RuntimeState;
 
@@ -297,8 +294,7 @@ public:
     // - mem_limit: maximum memory that will be used by the block mgr.
     // - buffer_size: maximum size of each buffer.
     static Status create(
-            // RuntimeState* state, MemTracker* parent,
-            RuntimeState* state, MemTracker* parent,
+            RuntimeState* state, const std::shared_ptr<MemTracker>& parent,
             RuntimeProfile* profile, TmpFileMgr* tmp_file_mgr,
             int64_t mem_limit, int64_t buffer_size,
             boost::shared_ptr<BufferedBlockMgr2>* block_mgr);
@@ -315,7 +311,7 @@ public:
     // Buffers used by this client are reflected in tracker.
     // TODO: The fact that we allow oversubscription is problematic.
     // as the code expects the reservations to always be granted (currently not the case).
-    Status register_client(int num_reserved_buffers, MemTracker* tracker,
+    Status register_client(int num_reserved_buffers, const std::shared_ptr<MemTracker>& tracker,
             RuntimeState* state, Client** client);
 
     // Clears all reservations for this client.
@@ -347,7 +343,7 @@ public:
     Status get_new_block(Client* client, Block* unpin_block, Block** block, int64_t len = -1);
 
     // Cancels the block mgr. All subsequent calls that return a Status fail with
-    // Status::CANCELLED. Idempotent.
+    // Status::Cancelled("Cancelled"). Idempotent.
     void cancel();
 
     // Returns true if the block manager was cancelled.
@@ -391,7 +387,7 @@ public:
 
     int num_pinned_buffers(Client* client) const;
     int num_reserved_buffers_remaining(Client* client) const;
-    MemTracker* get_tracker(Client* client) const;
+    std::shared_ptr<MemTracker> get_tracker(Client* client) const;
     int64_t max_block_size() const { {
         return _max_block_size; }
     }
@@ -428,7 +424,7 @@ private:
 
     // Initializes the block mgr. Idempotent and thread-safe.
     void init(DiskIoMgr* io_mgr, RuntimeProfile* profile,
-            MemTracker* parent_tracker, int64_t mem_limit);
+              const std::shared_ptr<MemTracker>& parent_tracker, int64_t mem_limit);
 
     // Initializes _tmp_files. This is initialized the first time we need to write to disk.
     // Must be called with _lock taken.
@@ -493,7 +489,7 @@ private:
 
     // Callback used by DiskIoMgr to indicate a block write has completed.  write_status
     // is the status of the write. _is_cancelled is set to true if write_status is not
-    // Status::OK or a re-issue of the write fails. Returns the block's buffer to the
+    // Status::OK() or a re-issue of the write fails. Returns the block's buffer to the
     // free buffers list if it is no longer pinned. Returns the block itself to the free
     // blocks list if it has been deleted.
     void write_complete(Block* block, const Status& write_status);
@@ -511,6 +507,9 @@ private:
     bool validate() const;
     std::string debug_internal() const;
 
+    // Add BE hostname and fragmentid for debug tuning
+    Status add_exec_msg(const std::string& msg) const;
+
     // Size of the largest/default block in bytes.
     const int64_t _max_block_size;
 
@@ -518,16 +517,16 @@ private:
     // Equal to the number of disks.
     const int _block_write_threshold;
 
-    // If true, spilling is disabled. The client calls will fail if there is not enough
+    // If false, spilling is disabled. The client calls will fail if there is not enough
     // memory.
-    const bool _disable_spill;
+    const bool _enable_spill;
 
     const TUniqueId _query_id;
 
     ObjectPool _obj_pool;
 
     // Track buffers allocated by the block manager.
-    boost::scoped_ptr<MemTracker> _mem_tracker;
+    std::shared_ptr<MemTracker> _mem_tracker;
 
     // The temporary file manager used to allocate temporary file space.
     TmpFileMgr* _tmp_file_mgr;
@@ -590,7 +589,7 @@ private:
     DiskIoMgr::RequestContext* _io_request_context;
 
     // If true, a disk write failed and all API calls return.
-    // Status::CANCELLED. Set to true if there was an error writing a block, or if
+    // Status::Cancelled("Cancelled"). Set to true if there was an error writing a block, or if
     // write_complete() needed to reissue the write and that failed.
     bool _is_cancelled;
 
@@ -638,12 +637,15 @@ private:
     // map contains only weak ptrs. BufferedBlockMgr2s that are handed out are shared ptrs.
     // When all the shared ptrs are no longer referenced, the BufferedBlockMgr2
     // d'tor will be called at which point the weak ptr will be removed from the map.
-    typedef boost::unordered_map<TUniqueId, boost::weak_ptr<BufferedBlockMgr2> > BlockMgrsMap;
+    typedef boost::unordered_map<TUniqueId, boost::weak_ptr<BufferedBlockMgr2>> BlockMgrsMap;
     static BlockMgrsMap _s_query_to_block_mgrs;
+
+    // Unowned.
+    RuntimeState* _state;
 
 }; // class BufferedBlockMgr2
 
-} // end namespace palo
+} // end namespace doris
 
-#endif // BDG_PALO_BE_SRC_RUNTIME_BUFFERED_BLOCK_MGR2_H
+#endif // DORIS_BE_SRC_RUNTIME_BUFFERED_BLOCK_MGR2_H
 

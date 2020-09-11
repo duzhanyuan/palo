@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -18,13 +20,10 @@
 #include <string>
 #include <vector>
 
-#include <boost/algorithm/string.hpp>
-#include <boost/filesystem.hpp>
-#include <boost/foreach.hpp>
-
 #include <thrift/protocol/TDebugProtocol.h>
 
 #include "exec/text_converter.hpp"
+#include "exprs/hll_hash_function.h"
 #include "gen_cpp/PlanNodes_types.h"
 #include "runtime/runtime_state.h"
 #include "runtime/row_batch.h"
@@ -37,7 +36,7 @@
 #include "olap/olap_common.h"
 #include "olap/utils.h"
 
-namespace palo {
+namespace doris {
 
 class StringRef {
 public:
@@ -58,7 +57,6 @@ public:
     }
 
     char const* c_str() const {
-
         return _begin;
     }
     char const* begin() const {
@@ -134,11 +132,11 @@ Status CsvScanNode::prepare(RuntimeState* state) {
     VLOG(1) << "CsvScanNode::Prepare";
 
     if (_is_init) {
-        return Status::OK;
+        return Status::OK();
     }
 
     if (nullptr == state) {
-        return Status("input runtime_state pointer is nullptr.");
+        return Status::InternalError("input runtime_state pointer is nullptr.");
     }
 
     RETURN_IF_ERROR(ScanNode::prepare(state));
@@ -149,14 +147,14 @@ Status CsvScanNode::prepare(RuntimeState* state) {
 
     _tuple_desc = state->desc_tbl().get_tuple_descriptor(_tuple_id);
     if (nullptr == _tuple_desc) {
-        return Status("Failed to get tuple descriptor.");
+        return Status::InternalError("Failed to get tuple descriptor.");
     }
 
     _slot_num = _tuple_desc->slots().size();
     const OlapTableDescriptor* csv_table =
             static_cast<const OlapTableDescriptor*>(_tuple_desc->table_desc());
     if (nullptr == csv_table) {
-        return Status("csv table pointer is nullptr.");
+        return Status::InternalError("csv table pointer is nullptr.");
     }
 
     // <column_name, slot_descriptor>
@@ -167,7 +165,7 @@ Status CsvScanNode::prepare(RuntimeState* state) {
         if (slot->type().type == TYPE_HLL) {
             TMiniLoadEtlFunction& function = _column_function_map[column_name];
             if (check_hll_function(function) == false) {
-                return Status("Function name or param error.");
+                return Status::InternalError("Function name or param error.");
             }
             _hll_column_num++;
         }
@@ -208,21 +206,21 @@ Status CsvScanNode::prepare(RuntimeState* state) {
     // new one scanner
     _csv_scanner.reset(new(std::nothrow) CsvScanner(_file_paths));
     if (_csv_scanner.get() == nullptr) {
-        return Status("new a csv scanner failed.");
+        return Status::InternalError("new a csv scanner failed.");
     }
 
-    _tuple_pool.reset(new(std::nothrow) MemPool(state->instance_mem_tracker()));
+    _tuple_pool.reset(new(std::nothrow) MemPool(state->instance_mem_tracker().get()));
     if (_tuple_pool.get() == nullptr) {
-        return Status("new a mem pool failed.");
+        return Status::InternalError("new a mem pool failed.");
     }
 
     _text_converter.reset(new(std::nothrow) TextConverter('\\'));
     if (_text_converter.get() == nullptr) {
-        return Status("new a text convertor failed.");
+        return Status::InternalError("new a text convertor failed.");
     }
 
     _is_init = true;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status CsvScanNode::open(RuntimeState* state) {
@@ -230,11 +228,11 @@ Status CsvScanNode::open(RuntimeState* state) {
     VLOG(1) << "CsvScanNode::Open";
 
     if (nullptr == state) {
-        return Status("input pointer is nullptr.");
+        return Status::InternalError("input pointer is nullptr.");
     }
 
     if (!_is_init) {
-        return Status("used before initialize.");
+        return Status::InternalError("used before initialize.");
     }
 
     _runtime_state = state;
@@ -244,17 +242,17 @@ Status CsvScanNode::open(RuntimeState* state) {
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     RETURN_IF_ERROR(_csv_scanner->open());
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status CsvScanNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) {
     VLOG(1) << "CsvScanNode::GetNext";
     if (nullptr == state || nullptr == row_batch || nullptr == eos) {
-        return Status("input is nullptr pointer");
+        return Status::InternalError("input is nullptr pointer");
     }
 
     if (!_is_init) {
-        return Status("used before initialize.");
+        return Status::InternalError("used before initialize.");
     }
 
     RETURN_IF_ERROR(exec_debug_action(TExecNodePhase::GETNEXT));
@@ -264,7 +262,7 @@ Status CsvScanNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos
 
     if (reached_limit()) {
         *eos = true;
-        return Status::OK;
+        return Status::OK();
     }
 
     // create new tuple buffer for row_batch
@@ -272,11 +270,11 @@ Status CsvScanNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos
     void* tuple_buffer = _tuple_pool->allocate(tuple_buffer_size);
 
     if (nullptr == tuple_buffer) {
-        return Status("Allocate memory failed.");
+        return Status::InternalError("Allocate memory failed.");
     }
 
     _tuple = reinterpret_cast<Tuple*>(tuple_buffer);
-    memset(_tuple, 0, sizeof(_tuple_desc->num_null_bytes()));
+    memset(_tuple, 0, _tuple_desc->num_null_bytes());
 
     // Indicates whether there are more rows to process.
     bool csv_eos = false;
@@ -290,7 +288,7 @@ Status CsvScanNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos
             // next get_next() call
             row_batch->tuple_data_pool()->acquire_data(_tuple_pool.get(), !reached_limit());
             *eos = reached_limit();
-            return Status::OK;
+            return Status::OK();
         }
 
         // read csv
@@ -302,12 +300,9 @@ Status CsvScanNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos
         }
         // split & check line & fill default value
         bool is_success = split_check_fill(line, state);
-        if (is_success) {
-            ++_normal_row_number;
-            state->set_normal_row_number(state->get_normal_row_number() + 1);
-        } else {
-            ++_error_row_number;
-            state->set_error_row_number(state->get_error_row_number() + 1);
+        ++_num_rows_load_total;
+        if (!is_success) {
+            ++_num_rows_load_filtered;
             continue;
         }
 
@@ -325,45 +320,46 @@ Status CsvScanNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos
             _tuple = reinterpret_cast<Tuple*>(new_tuple);
         }
     }
-    VLOG_ROW << "normal_row_number: " << state->get_normal_row_number()
-            << "; error_row_number: " << state->get_error_row_number() << std::endl;
+    state->update_num_rows_load_total(_num_rows_load_total);
+    state->update_num_rows_load_filtered(_num_rows_load_filtered);
+    VLOG_ROW << "normal_row_number: " << state->num_rows_load_success()
+            << "; error_row_number: " << state->num_rows_load_filtered() << std::endl;
 
     row_batch->tuple_data_pool()->acquire_data(_tuple_pool.get(), false);
 
     *eos = csv_eos;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status CsvScanNode::close(RuntimeState* state) {
     if (is_closed()) {
-        return Status::OK;
+        return Status::OK();
     }
     VLOG(1) << "CsvScanNode::Close";
     RETURN_IF_ERROR(exec_debug_action(TExecNodePhase::CLOSE));
 
     SCOPED_TIMER(_runtime_profile->total_time_counter());
 
-    if (memory_used_counter() != nullptr &&  _tuple_pool.get() != nullptr) {
-        COUNTER_UPDATE(memory_used_counter(), _tuple_pool->peak_allocated_bytes());
-    }
-
     RETURN_IF_ERROR(ExecNode::close(state));
 
-    if (state->get_normal_row_number() == 0) {
+    if (state->num_rows_load_success() == 0) {
         std::stringstream error_msg;
         error_msg << "Read zero normal line file. ";
-        state->append_error_msg_to_file("", error_msg.str());
+        state->append_error_msg_to_file("", error_msg.str(), true);
 
-        return Status(error_msg.str());
+        return Status::InternalError(error_msg.str());
     }
 
-    // Summary normal line and error line number info
-    std::stringstream summary_msg;
-    summary_msg << "error line: " << _error_row_number
-            << "; normal line: " << _normal_row_number;
-    state->append_error_msg_to_file("", summary_msg.str());
+    // only write summary line if there are error lines
+    if (_num_rows_load_filtered > 0) {
+        // Summary normal line and error line number info
+        std::stringstream summary_msg;
+        summary_msg << "error line: " << _num_rows_load_filtered
+            << "; normal line: " << state->num_rows_load_success();
+        state->append_error_msg_to_file("", summary_msg.str(), true);
+    }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 void CsvScanNode::debug_string(int indentation_level, stringstream* out) const {
@@ -377,7 +373,7 @@ void CsvScanNode::debug_string(int indentation_level, stringstream* out) const {
 }
 
 Status CsvScanNode::set_scan_ranges(const vector<TScanRangeParams>& scan_ranges) {
-    return Status::OK;
+    return Status::OK();
 }
 
 void CsvScanNode::fill_fix_length_string(
@@ -475,6 +471,7 @@ bool CsvScanNode::check_and_write_text_slot(
         const char* value, int value_length,
         const SlotDescriptor* slot, RuntimeState* state,
         std::stringstream* error_msg) {
+
     if (value_length == 0 && !slot->type().is_string_type()) {
         (*error_msg) << "the length of input should not be 0. "
                 << "column_name: " << column_name << "; "
@@ -483,9 +480,23 @@ bool CsvScanNode::check_and_write_text_slot(
         return false;
     }
 
-    if (slot->is_nullable() && is_null(value, value_length)) {
-        _tuple->set_null(slot->null_indicator_offset());
-        return true;
+    if (is_null(value, value_length)) {
+        if (slot->is_nullable()) {
+            _tuple->set_null(slot->null_indicator_offset());
+            return true;
+        } else {
+            (*error_msg) << "value cannot be null. column name: " << column_name
+                << "; type: " << slot->type() << "; input_str: ["
+                << std::string(value, value_length) << "].";
+            return false;
+        }
+    }
+
+    if (!slot->is_nullable() && is_null(value, value_length)) {
+        (*error_msg) << "value cannot be null. column name: " << column_name
+                << "; type: " << slot->type() << "; input_str: ["
+                << std::string(value, value_length) << "].";
+        return false;
     }
 
     char* value_to_convert = const_cast<char*>(value);
@@ -539,7 +550,6 @@ bool CsvScanNode::split_check_fill(const std::string& line, RuntimeState* state)
     std::vector<StringRef> fields;
     {
         SCOPED_TIMER(_split_line_timer);
-        // boost::split(fields, line, boost::is_any_of(_column_separator));
         split_line(line, _column_separator[0], fields);
     }
 
@@ -652,21 +662,19 @@ void CsvScanNode::hll_hash(const char* src, int len, std::string* result) {
     std::string str(src, len);
     if (str != "\\N") {
         uint64_t hash = HashUtil::murmur_hash64A(src, len, HashUtil::MURMUR_SEED);
-        char buf[11];
-        memset(buf, 0, 11);
+        char buf[10];
         // expliclit set
         buf[0] = HLL_DATA_EXPLICIT;
         buf[1] = 1;
         *((uint64_t*)(buf + 2)) = hash;
-        *result = std::string(buf, 11);
+        *result = std::string(buf, sizeof(buf));
     } else {
-        char buf[2];
-        memset(buf, 0, 2);
+        char buf[1];
         // empty set
         buf[0] = HLL_DATA_EMPTY;
-        *result = std::string(buf, 2);
+        *result = std::string(buf, sizeof(buf));
     }
 }
 
-} // end namespace palo
+} // end namespace doris
 

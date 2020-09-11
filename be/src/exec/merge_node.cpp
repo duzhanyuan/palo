@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -28,7 +25,7 @@
 
 using std::vector;
 
-namespace palo {
+namespace doris {
 
 MergeNode::MergeNode(ObjectPool* pool, const TPlanNode& tnode,
                      const DescriptorTbl& descs) :
@@ -41,25 +38,25 @@ MergeNode::MergeNode(ObjectPool* pool, const TPlanNode& tnode,
         _child_row_idx(0) {
 }
 
-Status MergeNode::init(const TPlanNode& tnode) {
-    RETURN_IF_ERROR(ExecNode::init(tnode));
+Status MergeNode::init(const TPlanNode& tnode, RuntimeState* state) {
+    RETURN_IF_ERROR(ExecNode::init(tnode, state));
     DCHECK(tnode.__isset.merge_node);
     // Create _const_expr_lists from thrift exprs.
-    const vector<vector<TExpr> >& const_texpr_lists = tnode.merge_node.const_expr_lists;
+    const vector<vector<TExpr>>& const_texpr_lists = tnode.merge_node.const_expr_lists;
     for (int i = 0; i < const_texpr_lists.size(); ++i) {
         vector<ExprContext*> ctxs;
         RETURN_IF_ERROR(Expr::create_expr_trees(_pool, const_texpr_lists[i], &ctxs));
         _const_result_expr_ctx_lists.push_back(ctxs);
     }
     // Create _result_expr__ctx_lists from thrift exprs.
-    const vector<vector<TExpr> >& result_texpr_lists = tnode.merge_node.result_expr_lists;
+    const vector<vector<TExpr>>& result_texpr_lists = tnode.merge_node.result_expr_lists;
     for (int i = 0; i < result_texpr_lists.size(); ++i) {
         vector<ExprContext*> ctxs;
         RETURN_IF_ERROR(Expr::create_expr_trees(_pool, result_texpr_lists[i], &ctxs));
         _result_expr_ctx_lists.push_back(ctxs);
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status MergeNode::prepare(RuntimeState* state) {
@@ -90,7 +87,7 @@ Status MergeNode::prepare(RuntimeState* state) {
         DCHECK_EQ(_result_expr_ctx_lists[i].size(), _materialized_slots.size());
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status MergeNode::open(RuntimeState* state) {
@@ -105,7 +102,7 @@ Status MergeNode::open(RuntimeState* state) {
         RETURN_IF_ERROR(Expr::open(_result_expr_ctx_lists[i], state));
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status MergeNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) {
@@ -127,7 +124,7 @@ Status MergeNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) 
         *eos = reached_limit();
 
         if (*eos || row_batch->is_full()) {
-            return Status::OK;
+            return Status::OK();
         }
     }
 
@@ -141,7 +138,7 @@ Status MergeNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) 
         if (_child_row_batch.get() == NULL) {
             RETURN_IF_CANCELLED(state);
             _child_row_batch.reset(
-                new RowBatch(child(_child_idx)->row_desc(), state->batch_size(), mem_tracker()));
+                new RowBatch(child(_child_idx)->row_desc(), state->batch_size(), mem_tracker().get()));
             // Open child and fetch the first row batch.
             RETURN_IF_ERROR(child(_child_idx)->open(state));
             RETURN_IF_ERROR(child(_child_idx)->get_next(state, _child_row_batch.get(),
@@ -160,7 +157,7 @@ Status MergeNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) 
                     _child_idx = INVALID_CHILD_IDX;
                 }
 
-                return Status::OK;
+                return Status::OK();
             }
 
             // Fetch new batch if one is available, otherwise move on to next child.
@@ -182,12 +179,12 @@ Status MergeNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) 
 
     _child_idx = INVALID_CHILD_IDX;
     *eos = true;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status MergeNode::close(RuntimeState* state) {
     if (is_closed()) {
-        return Status::OK;
+        return Status::OK();
     }
     // don't call ExecNode::close(), it always closes all children
     _child_row_batch.reset(NULL);

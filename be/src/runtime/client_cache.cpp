@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -31,11 +28,21 @@
 
 #include "common/logging.h"
 #include "util/container_util.hpp"
+#include "util/doris_metrics.h"
 #include "util/network_util.h"
 #include "util/thrift_util.h"
 #include "gen_cpp/FrontendService.h"
 
-namespace palo {
+namespace doris {
+
+DEFINE_GAUGE_METRIC_PROTOTYPE_3ARG(thrift_used_clients, MetricUnit::NOUNIT, "Number of clients 'checked-out' from the cache");
+DEFINE_GAUGE_METRIC_PROTOTYPE_3ARG(thrift_opened_clients, MetricUnit::NOUNIT, "Total clients in the cache, including those in use");
+
+ClientCacheHelper::~ClientCacheHelper() {
+    for (auto& it : _client_map) {
+        delete it.second;
+    }
+}
 
 Status ClientCacheHelper::get_client(
         const TNetworkAddress& hostport,
@@ -64,10 +71,10 @@ Status ClientCacheHelper::get_client(
     _client_map[*client_key]->set_recv_timeout(timeout_ms);
 
     if (_metrics_enabled) {
-        _clients_in_use_metric->increment(1);
+        thrift_used_clients->increment(1);
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 Status ClientCacheHelper::reopen_client(client_factory factory_method, void** client_key,
@@ -79,10 +86,7 @@ Status ClientCacheHelper::reopen_client(client_factory factory_method, void** cl
     const std::string ipaddress = info->ipaddress();
     int port = info->port();
 
-    // We don't expect Close() to fail. Even if it fails, we should continue on to delete
-    // the transport and remove it from the map.
-    Status status = info->close();
-    DCHECK(status.ok());
+    info->close();
 
     // TODO: Thrift TBufferedTransport cannot be re-opened after Close() because it does
     // not clean up internal buffers it reopens. To work around this issue, create a new
@@ -92,7 +96,7 @@ Status ClientCacheHelper::reopen_client(client_factory factory_method, void** cl
     *client_key = NULL;
 
     if (_metrics_enabled) {
-        _total_clients_metric->increment(-1);
+        thrift_opened_clients->increment(-1);
     }
 
     RETURN_IF_ERROR(create_client(make_network_address(
@@ -100,7 +104,7 @@ Status ClientCacheHelper::reopen_client(client_factory factory_method, void** cl
 
     _client_map[*client_key]->set_send_timeout(timeout_ms);
     _client_map[*client_key]->set_recv_timeout(timeout_ms);
-    return Status::OK;
+    return Status::OK();
 }
 
 Status ClientCacheHelper::create_client(
@@ -120,31 +124,39 @@ Status ClientCacheHelper::create_client(
     }
 
     // Because the client starts life 'checked out', we don't add it to the cache map
-    _client_map[*client_key] = client_impl.get();
-    client_impl.release();
+    _client_map[*client_key] = client_impl.release();
 
     if (_metrics_enabled) {
-        _total_clients_metric->increment(1);
+        thrift_opened_clients->increment(1);
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 void ClientCacheHelper::release_client(void** client_key) {
     DCHECK(*client_key != NULL) << "Trying to release NULL client";
     boost::lock_guard<boost::mutex> lock(_lock);
-    ClientMap::iterator i = _client_map.find(*client_key);
-    DCHECK(i != _client_map.end());
-    ThriftClientImpl* info = i->second;
-    //VLOG_RPC << "releasing client for "
-    //         << info->ipaddress() << ":" << info->port();
-    ClientCacheMap::iterator j =
-        _client_cache.find(make_network_address(info->ipaddress(), info->port()));
+    ClientMap::iterator client_map_entry = _client_map.find(*client_key);
+    DCHECK(client_map_entry != _client_map.end());
+    ThriftClientImpl* info = client_map_entry->second;
+    ClientCacheMap::iterator j = _client_cache.find(make_network_address(info->ipaddress(), info->port()));
     DCHECK(j != _client_cache.end());
-    j->second.push_back(*client_key);
+    
+    if (_max_cache_size_per_host >=0 && j->second.size() >= _max_cache_size_per_host) {
+        // cache of this host is full, close this client connection and remove if from _client_map
+        info->close();
+        _client_map.erase(*client_key);
+        delete info;
+
+        if (_metrics_enabled) {
+            thrift_opened_clients->increment(-1);
+        }
+    } else {
+        j->second.push_back(*client_key);
+    }
 
     if (_metrics_enabled) {
-        _clients_in_use_metric->increment(-1);
+        thrift_used_clients->increment(-1);
     }
 
     *client_key = NULL;
@@ -163,7 +175,10 @@ void ClientCacheHelper::close_connections(const TNetworkAddress& hostport) {
     BOOST_FOREACH(void * client_key, cache_entry->second) {
         ClientMap::iterator client_map_entry = _client_map.find(client_key);
         DCHECK(client_map_entry != _client_map.end());
-        client_map_entry->second->close();
+        ThriftClientImpl* info = client_map_entry->second;
+        info->close();
+        _client_map.erase(client_key);
+        delete info;
     }
 }
 
@@ -199,19 +214,17 @@ void ClientCacheHelper::test_shutdown() {
     }
 }
 
-void ClientCacheHelper::init_metrics(MetricGroup* metrics, const std::string& key_prefix) {
-    DCHECK(metrics != NULL);
+void ClientCacheHelper::init_metrics(const std::string& name) {
     // Not strictly needed if init_metrics is called before any cache
     // usage, but ensures that _metrics_enabled is published.
     boost::lock_guard<boost::mutex> lock(_lock);
-    std::stringstream count_ss;
-    count_ss << key_prefix << ".client_cache.clients_in_use";
-    _clients_in_use_metric =
-        metrics->AddGauge(count_ss.str(), 0L);
 
-    std::stringstream max_ss;
-    max_ss << key_prefix << ".client_cache.total_clients";
-    _total_clients_metric = metrics->AddGauge(max_ss.str(), 0L);
+    _thrift_client_metric_entity =
+        DorisMetrics::instance()->metric_registry()->register_entity(
+            std::string("thrift_client.") + name, {{"name", name}});
+    INT_GAUGE_METRIC_REGISTER(_thrift_client_metric_entity, thrift_used_clients);
+    INT_GAUGE_METRIC_REGISTER(_thrift_client_metric_entity, thrift_opened_clients);
+
     _metrics_enabled = true;
 }
 

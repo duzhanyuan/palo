@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -29,11 +26,8 @@
 #include "runtime/raw_value.h"
 #include "runtime/tuple_row.h"
 #include "runtime/string_value.h"
-#include "util/debug_util.h"
 
-namespace palo {
-
-const char* Tuple::_s_llvm_class_name = "class.palo::Tuple";
+namespace doris {
 
 int64_t Tuple::total_byte_size(const TupleDescriptor& desc) const {
     int64_t result = desc.byte_size();
@@ -127,19 +121,17 @@ int64_t Tuple::release_string(const TupleDescriptor& desc) {
     return bytes;
 }
 
-void Tuple::deep_copy(const TupleDescriptor& desc, char** data, int* offset,
-                     bool convert_ptrs) {
+void Tuple::deep_copy(
+        const TupleDescriptor& desc, char** data, int* offset, bool convert_ptrs) {
     Tuple* dst = reinterpret_cast<Tuple*>(*data);
     memory_copy(dst, this, desc.byte_size());
     *data += desc.byte_size();
     *offset += desc.byte_size();
 
-    for (std::vector<SlotDescriptor*>::const_iterator i = desc.string_slots().begin();
-            i != desc.string_slots().end(); ++i) {
-        DCHECK((*i)->type().is_string_type());
-
-        if (!dst->is_null((*i)->null_indicator_offset())) {
-            StringValue* string_v = dst->get_string_slot((*i)->tuple_offset());
+    for (auto slot_desc : desc.string_slots()) {
+        DCHECK(slot_desc->type().is_string_type());
+        if (!dst->is_null(slot_desc->null_indicator_offset())) {
+            StringValue* string_v = dst->get_string_slot(slot_desc->tuple_offset());
             memory_copy(*data, string_v->ptr, string_v->len);
             string_v->ptr = (convert_ptrs ? reinterpret_cast<char*>(*offset) : *data);
             *data += string_v->len;
@@ -204,4 +196,44 @@ template void Tuple::materialize_exprs<false>(TupleRow* row, const TupleDescript
 template void Tuple::materialize_exprs<true>(TupleRow* row, const TupleDescriptor& desc,
     const std::vector<ExprContext*>& materialize_expr_ctxs, MemPool* pool,
     std::vector<StringValue*>* non_null_var_values, int* total_var_len);
+
+std::string Tuple::to_string(const TupleDescriptor& d) const {
+    std::stringstream out;
+    out << "(";
+
+    bool first_value = true;
+    for (auto slot : d.slots()) {
+        if (!slot->is_materialized()) {
+            continue;
+        }
+        if (first_value) {
+            first_value = false;
+        } else {
+            out << " ";
+        }
+
+        if (is_null(slot->null_indicator_offset())) {
+            out << "null";
+        } else {
+            std::string value_str;
+            RawValue::print_value(
+                    get_slot(slot->tuple_offset()),
+                    slot->type(),
+                    -1,
+                    &value_str);
+            out << value_str;
+        }
+    }
+
+    out << ")";
+    return out.str();
+}
+
+std::string Tuple::to_string(const Tuple* t, const TupleDescriptor& d) {
+    if (t == nullptr) {
+        return "null";
+    }
+    return t->to_string(d);
+}
+
 }

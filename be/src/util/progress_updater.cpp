@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -22,7 +19,7 @@
 
 #include "common/logging.h"
 
-namespace palo {
+namespace doris {
 
 ProgressUpdater::ProgressUpdater(const std::string& label, int64_t total, int period) :
         _label(label), _logging_level(2), _total(total), _update_period(period),

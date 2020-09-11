@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -18,13 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "exec/schema_scanner/frontend_helper.h"
+#include "exec/schema_scanner/schema_helper.h"
 #include "exec/schema_scanner/schema_tables_scanner.h"
 #include "runtime/primitive_type.h"
 #include "runtime/string_value.h"
-#include "runtime/datetime_value.h"
+//#include "runtime/datetime_value.h"
 
-namespace palo 
+namespace doris
 {
 
 SchemaScanner::ColumnDesc SchemaTablesScanner::_s_tbls_columns[] = {
@@ -53,7 +50,7 @@ SchemaScanner::ColumnDesc SchemaTablesScanner::_s_tbls_columns[] = {
 };
 
 SchemaTablesScanner::SchemaTablesScanner()
-        : SchemaScanner(_s_tbls_columns, 
+        : SchemaScanner(_s_tbls_columns,
                         sizeof(_s_tbls_columns) / sizeof(SchemaScanner::ColumnDesc)),
         _db_index(0),
         _table_index(0) {
@@ -64,23 +61,30 @@ SchemaTablesScanner::~SchemaTablesScanner() {
 
 Status SchemaTablesScanner::start(RuntimeState *state) {
     if (!_is_init) {
-        return Status("used before initialized.");
+        return Status::InternalError("used before initialized.");
     }
     TGetDbsParams db_params;
     if (NULL != _param->db) {
         db_params.__set_pattern(*(_param->db));
     }
-    if (NULL != _param->user) {
-        db_params.__set_user(*(_param->user));
-    }
-    
-    if (NULL != _param->ip && 0 != _param->port) {
-        RETURN_IF_ERROR(FrontendHelper::get_db_names(*(_param->ip),
-                    _param->port, db_params, &_db_result)); 
+    if (NULL != _param->current_user_ident) {
+        db_params.__set_current_user_ident(*(_param->current_user_ident));
     } else {
-        return Status("IP or port dosn't exists");
+        if (NULL != _param->user) {
+            db_params.__set_user(*(_param->user));
+        }
+        if (NULL != _param->user_ip) {
+            db_params.__set_user_ip(*(_param->user_ip));
+        }
     }
-    return Status::OK;
+
+    if (NULL != _param->ip && 0 != _param->port) {
+        RETURN_IF_ERROR(SchemaHelper::get_db_names(*(_param->ip),
+                    _param->port, db_params, &_db_result));
+    } else {
+        return Status::InternalError("IP or port dosn't exists");
+    }
+    return Status::OK();
 }
 
 Status SchemaTablesScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
@@ -95,7 +99,7 @@ Status SchemaTablesScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
     {
         void *slot = tuple->get_slot(_tuple_desc->slots()[1]->tuple_offset());
         StringValue* str_slot = reinterpret_cast<StringValue*>(slot);
-        std::string db_name = FrontendHelper::extract_db_name(_db_result.dbs[_db_index - 1]);
+        std::string db_name = SchemaHelper::extract_db_name(_db_result.dbs[_db_index - 1]);
         str_slot->ptr = (char *)pool->allocate(db_name.size());
         str_slot->len = db_name.size();
         memcpy(str_slot->ptr, db_name.c_str(), str_slot->len);
@@ -108,7 +112,7 @@ Status SchemaTablesScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
         str_slot->len = src->length();
         str_slot->ptr = (char *)pool->allocate(str_slot->len);
         if (NULL == str_slot->ptr) {
-            return Status("Allocate memcpy failed.");
+            return Status::InternalError("Allocate memcpy failed.");
         }
         memcpy(str_slot->ptr, src->c_str(), str_slot->len);
     }
@@ -120,7 +124,7 @@ Status SchemaTablesScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
         str_slot->len = src->length();
         str_slot->ptr = (char *)pool->allocate(str_slot->len);
         if (NULL == str_slot->ptr) {
-            return Status("Allocate memcpy failed.");
+            return Status::InternalError("Allocate memcpy failed.");
         }
         memcpy(str_slot->ptr, src->c_str(), str_slot->len);
     }
@@ -132,7 +136,7 @@ Status SchemaTablesScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
         str_slot->len = src->length();
         str_slot->ptr = (char *)pool->allocate(str_slot->len);
         if (NULL == str_slot->ptr) {
-            return Status("Allocate memcpy failed.");
+            return Status::InternalError("Allocate memcpy failed.");
         }
         memcpy(str_slot->ptr, src->c_str(), str_slot->len);
     } else {
@@ -174,17 +178,34 @@ Status SchemaTablesScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
     {
         tuple->set_null(_tuple_desc->slots()[13]->null_indicator_offset());
     }
-    // create_time
-    {
-        tuple->set_null(_tuple_desc->slots()[14]->null_indicator_offset());
+    // creation_time
+    if (tbl_status.__isset.create_time) {
+        int64_t create_time = tbl_status.create_time;
+        if (create_time <= 0) {
+            tuple->set_null(_tuple_desc->slots()[14]->null_indicator_offset());
+        } else {
+            tuple->set_not_null(_tuple_desc->slots()[14]->null_indicator_offset());
+            void *slot = tuple->get_slot(_tuple_desc->slots()[14]->tuple_offset());
+            DateTimeValue *time_slot = reinterpret_cast<DateTimeValue*>(slot);
+            time_slot->from_unixtime(create_time, TimezoneUtils::default_time_zone);
+        }
+
     }
     // update_time
     {
         tuple->set_null(_tuple_desc->slots()[15]->null_indicator_offset());
     }
     // check_time
-    {
-        tuple->set_null(_tuple_desc->slots()[16]->null_indicator_offset());
+    if (tbl_status.__isset.last_check_time) {
+        int64_t check_time = tbl_status.last_check_time;
+        if (check_time <= 0) {
+            tuple->set_null(_tuple_desc->slots()[16]->null_indicator_offset());
+        } else {
+            tuple->set_not_null(_tuple_desc->slots()[16]->null_indicator_offset());
+            void *slot = tuple->get_slot(_tuple_desc->slots()[16]->tuple_offset());
+            DateTimeValue *time_slot = reinterpret_cast<DateTimeValue*>(slot);
+            time_slot->from_unixtime(check_time, TimezoneUtils::default_time_zone);
+        }
     }
     // collation
     {
@@ -209,13 +230,13 @@ Status SchemaTablesScanner::fill_one_row(Tuple *tuple, MemPool *pool) {
         } else {
             str_slot->ptr = (char *)pool->allocate(str_slot->len);
             if (NULL == str_slot->ptr) {
-                return Status("Allocate memcpy failed.");
+                return Status::InternalError("Allocate memcpy failed.");
             }
             memcpy(str_slot->ptr, src->c_str(), str_slot->len);
         }
     }
     _table_index++;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SchemaTablesScanner::get_new_table() {
@@ -224,33 +245,40 @@ Status SchemaTablesScanner::get_new_table() {
     if (NULL != _param->wild) {
         table_params.__set_pattern(*(_param->wild));
     }
-    if (NULL != _param->user) {
-        table_params.__set_user(*(_param->user));
+    if (NULL != _param->current_user_ident) {
+        table_params.__set_current_user_ident(*(_param->current_user_ident));
+    } else {
+        if (NULL != _param->user) {
+            table_params.__set_user(*(_param->user));
+        }
+        if (NULL != _param->user_ip) {
+            table_params.__set_user_ip(*(_param->user_ip));
+        }
     }
 
     if (NULL != _param->ip && 0 != _param->port) {
-        RETURN_IF_ERROR(FrontendHelper::list_table_status(*(_param->ip),
-                _param->port, table_params, &_table_result)); 
+        RETURN_IF_ERROR(SchemaHelper::list_table_status(*(_param->ip),
+                _param->port, table_params, &_table_result));
     } else {
-        return Status("IP or port dosn't exists");
+        return Status::InternalError("IP or port dosn't exists");
     }
     _table_index = 0;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SchemaTablesScanner::get_next_row(Tuple *tuple, MemPool *pool, bool *eos) {
     if (!_is_init) {
-        return Status("Used before initialized.");
+        return Status::InternalError("Used before initialized.");
     }
     if (NULL == tuple || NULL == pool || NULL == eos) {
-        return Status("input pointer is NULL.");
+        return Status::InternalError("input pointer is NULL.");
     }
     while (_table_index >= _table_result.tables.size()) {
         if (_db_index < _db_result.dbs.size()) {
             RETURN_IF_ERROR(get_new_table());
         } else {
             *eos = true;
-            return Status::OK;
+            return Status::OK();
         }
     }
     *eos = false;

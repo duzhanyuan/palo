@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -24,16 +21,13 @@
 #include <ios>
 #include <sstream>
 
-#include <llvm/ExecutionEngine/ExecutionEngine.h>
-#include <llvm/IR/DataLayout.h>
-
-#include "codegen/llvm_codegen.h"
 #include "common/object_pool.h"
 #include "gen_cpp/Descriptors_types.h"
+#include "gen_cpp/descriptors.pb.h"
 #include "gen_cpp/PlanNodes_types.h"
 #include "exprs/expr.h"
 
-namespace palo {
+namespace doris {
 using boost::algorithm::join;
 
 const int RowDescriptor::INVALID_IDX = -1;
@@ -58,11 +52,36 @@ SlotDescriptor::SlotDescriptor(const TSlotDescriptor& tdesc)
       _null_indicator_offset(tdesc.nullIndicatorByte, tdesc.nullIndicatorBit),
       _col_name(tdesc.colName),
       _slot_idx(tdesc.slotIdx),
+      _slot_size(_type.get_slot_size()),
       _field_idx(-1),
-      _is_materialized(tdesc.isMaterialized),
-      _is_null_fn(NULL),
-      _set_not_null_fn(NULL),
-      _set_null_fn(NULL) {
+      _is_materialized(tdesc.isMaterialized) {
+}
+
+SlotDescriptor::SlotDescriptor(const PSlotDescriptor& pdesc)
+        : _id(pdesc.id()),
+        _type(TypeDescriptor::from_protobuf(pdesc.slot_type())),
+        _parent(pdesc.parent()),
+        _col_pos(pdesc.column_pos()),
+        _tuple_offset(pdesc.byte_offset()),
+        _null_indicator_offset(pdesc.null_indicator_byte(), pdesc.null_indicator_bit()),
+        _col_name(pdesc.col_name()),
+        _slot_idx(pdesc.slot_idx()),
+        _slot_size(_type.get_slot_size()),
+        _field_idx(-1),
+        _is_materialized(pdesc.is_materialized()) {
+}
+
+void SlotDescriptor::to_protobuf(PSlotDescriptor* pslot) const {
+    pslot->set_id(_id);
+    pslot->set_parent(_parent);
+    _type.to_protobuf(pslot->mutable_slot_type());
+    pslot->set_column_pos(_col_pos);
+    pslot->set_byte_offset(_tuple_offset);
+    pslot->set_null_indicator_byte(_null_indicator_offset.byte_offset);
+    pslot->set_null_indicator_bit(_null_indicator_offset.bit_offset);
+    pslot->set_col_name(_col_name);
+    pslot->set_slot_idx(_slot_idx);
+    pslot->set_is_materialized(_is_materialized);
 }
 
 std::string SlotDescriptor::debug_string() const {
@@ -123,21 +142,17 @@ std::string BrokerTableDescriptor::debug_string() const {
     return out.str();
 }
 
-KuduTableDescriptor::KuduTableDescriptor(const TTableDescriptor& tdesc)
-  : TableDescriptor(tdesc),
-    table_name_(tdesc.kuduTable.table_name),
-    key_columns_(tdesc.kuduTable.key_columns),
-    master_addresses_(tdesc.kuduTable.master_addresses) {
+EsTableDescriptor::EsTableDescriptor(const TTableDescriptor& tdesc)
+    : TableDescriptor(tdesc) {
 }
 
-std::string KuduTableDescriptor::DebugString() const {
-  std::stringstream out;
-  out << "KuduTable(" << TableDescriptor::debug_string() << " table=" << table_name_;
-  out << " master_addrs=[" << boost::join(master_addresses_, ",") << "]";
-  out << " key_columns=[";
-  out << join(key_columns_, ":");
-  out << "])";
-  return out.str();
+EsTableDescriptor::~EsTableDescriptor() {
+}
+
+std::string EsTableDescriptor::debug_string() const {
+    std::stringstream out;
+    out << "EsTable(" << TableDescriptor::debug_string() << ")";
+    return out.str();
 }
 
 MySQLTableDescriptor::MySQLTableDescriptor(const TTableDescriptor& tdesc)
@@ -166,14 +181,29 @@ TupleDescriptor::TupleDescriptor(const TTupleDescriptor& tdesc) :
         _num_null_bytes(tdesc.numNullBytes),
         _num_materialized_slots(0),
         _slots(),
-        _has_varlen_slots(false),
-        _llvm_struct(NULL) {
+        _has_varlen_slots(false) {
       if (false == tdesc.__isset.numNullSlots) {
         //be compatible for existing tables with no NULL value
         _num_null_slots = 0;
       } else {
         _num_null_slots = tdesc.numNullSlots;
       }
+}
+
+TupleDescriptor::TupleDescriptor(const PTupleDescriptor& pdesc)
+        : _id(pdesc.id()),
+        _table_desc(NULL),
+        _byte_size(pdesc.byte_size()),
+        _num_null_bytes(pdesc.num_null_bytes()),
+        _num_materialized_slots(0),
+        _slots(),
+        _has_varlen_slots(false) {
+    if (!pdesc.has_num_null_slots()) {
+        //be compatible for existing tables with no NULL value
+        _num_null_slots = 0;
+    } else {
+        _num_null_slots = pdesc.num_null_slots();
+    }
 }
 
 void TupleDescriptor::add_slot(SlotDescriptor* slot) {
@@ -189,6 +219,35 @@ void TupleDescriptor::add_slot(SlotDescriptor* slot) {
             _no_string_slots.push_back(slot);
         }
     }
+}
+
+std::vector<SlotDescriptor*> TupleDescriptor::slots_ordered_by_idx() const {
+    std::vector<SlotDescriptor*> sorted_slots(slots().size());
+    for (SlotDescriptor* slot: slots()) {
+        sorted_slots[slot->_slot_idx] = slot;
+    }
+    return sorted_slots;
+}
+
+bool TupleDescriptor::layout_equals(const TupleDescriptor& other_desc) const {
+    if (byte_size() != other_desc.byte_size()) return false;
+    if (slots().size() != other_desc.slots().size()) return false;
+
+    std::vector<SlotDescriptor*> slots = slots_ordered_by_idx();
+    std::vector<SlotDescriptor*> other_slots = other_desc.slots_ordered_by_idx();
+    for (int i = 0; i < slots.size(); ++i) {
+      if (!slots[i]->layout_equals(*other_slots[i])) return false;
+    }
+    return true;
+}
+
+void TupleDescriptor::to_protobuf(PTupleDescriptor* ptuple) const {
+    ptuple->Clear();
+    ptuple->set_id(_id);
+    ptuple->set_byte_size(_byte_size);
+    ptuple->set_num_null_bytes(_num_null_bytes);
+    ptuple->set_table_id(-1);
+    ptuple->set_num_null_slots(_num_null_slots);
 }
 
 std::string TupleDescriptor::debug_string() const {
@@ -236,6 +295,22 @@ RowDescriptor::RowDescriptor(
 RowDescriptor::RowDescriptor(TupleDescriptor* tuple_desc, bool is_nullable) :
         _tuple_desc_map(1, tuple_desc),
         _tuple_idx_nullable_map(1, is_nullable) {
+    init_tuple_idx_map();
+    init_has_varlen_slots();
+}
+
+RowDescriptor::RowDescriptor(const RowDescriptor& lhs_row_desc,
+                             const RowDescriptor& rhs_row_desc) {
+    _tuple_desc_map.insert(_tuple_desc_map.end(), lhs_row_desc._tuple_desc_map.begin(),
+                           lhs_row_desc._tuple_desc_map.end());
+    _tuple_desc_map.insert(_tuple_desc_map.end(), rhs_row_desc._tuple_desc_map.begin(),
+                           rhs_row_desc._tuple_desc_map.end());
+    _tuple_idx_nullable_map.insert(_tuple_idx_nullable_map.end(),
+                                   lhs_row_desc._tuple_idx_nullable_map.begin(),
+                                   lhs_row_desc._tuple_idx_nullable_map.end());
+    _tuple_idx_nullable_map.insert(_tuple_idx_nullable_map.end(),
+                                   rhs_row_desc._tuple_idx_nullable_map.begin(),
+                                   rhs_row_desc._tuple_idx_nullable_map.end());
     init_tuple_idx_map();
     init_has_varlen_slots();
 }
@@ -300,6 +375,14 @@ void RowDescriptor::to_thrift(std::vector<TTupleId>* row_tuple_ids) {
     }
 }
 
+void RowDescriptor::to_protobuf(
+        google::protobuf::RepeatedField<google::protobuf::int32 >* row_tuple_ids) {
+    row_tuple_ids->Clear();
+    for (auto desc : _tuple_desc_map) {
+        row_tuple_ids->Add(desc->id());
+    }
+}
+
 bool RowDescriptor::is_prefix_of(const RowDescriptor& other_desc) const {
     if (_tuple_desc_map.size() > other_desc._tuple_desc_map.size()) {
         return false;
@@ -328,6 +411,19 @@ bool RowDescriptor::equals(const RowDescriptor& other_desc) const {
     }
 
     return true;
+}
+
+bool RowDescriptor::layout_is_prefix_of(const RowDescriptor& other_desc) const {
+  if (_tuple_desc_map.size() > other_desc._tuple_desc_map.size()) return false;
+  for (int i = 0; i < _tuple_desc_map.size(); ++i) {
+    if (!_tuple_desc_map[i]->layout_equals(*other_desc._tuple_desc_map[i])) return false;
+  }
+  return true;
+}
+
+bool RowDescriptor::layout_equals(const RowDescriptor& other_desc) const {
+    if (_tuple_desc_map.size() != other_desc._tuple_desc_map.size()) return false;
+    return layout_is_prefix_of(other_desc);
 }
 
 std::string RowDescriptor::debug_string() const {
@@ -387,6 +483,9 @@ Status DescriptorTbl::create(ObjectPool* pool, const TDescriptorTable& thrift_tb
         case TTableType::BROKER_TABLE:
             desc = pool->add(new BrokerTableDescriptor(tdesc));
             break;
+        case TTableType::ES_TABLE:
+            desc = pool->add(new EsTableDescriptor(tdesc));
+            break;
         default:
             DCHECK(false) << "invalid table type: " << tdesc.tableType;
         }
@@ -416,13 +515,13 @@ Status DescriptorTbl::create(ObjectPool* pool, const TDescriptorTable& thrift_tb
         TupleDescriptorMap::iterator entry = (*tbl)->_tuple_desc_map.find(tdesc.parent);
 
         if (entry == (*tbl)->_tuple_desc_map.end()) {
-            return Status("unknown tid in slot descriptor msg");
+            return Status::InternalError("unknown tid in slot descriptor msg");
         }
 
         entry->second->add_slot(slot_d);
     }
 
-    return Status::OK;
+    return Status::OK();
 }
 
 TableDescriptor* DescriptorTbl::get_table_descriptor(TableId id) const {
@@ -468,165 +567,13 @@ void DescriptorTbl::get_tuple_descs(std::vector<TupleDescriptor*>* descs) const 
     }
 }
 
-// Generate function to check if a slot is null.  The resulting IR looks like:
-// (in this case the tuple contains only a nullable double)
-// define i1 @IsNull({ i8, double }* %tuple) {
-// entry:
-//   %null_byte_ptr = getelementptr inbounds { i8, double }* %tuple, i32 0, i32 0
-//   %null_byte = load i8* %null_byte_ptr
-//   %null_mask = and i8 %null_byte, 1
-//   %is_null = icmp ne i8 %null_mask, 0
-//   ret i1 %is_null
-// }
-llvm::Function* SlotDescriptor::codegen_is_null(LlvmCodeGen* codegen, llvm::StructType* tuple) {
-    if (_is_null_fn != NULL) {
-        return _is_null_fn;
-    }
-
-    llvm::PointerType* tuple_ptr_type = llvm::PointerType::get(tuple, 0);
-    LlvmCodeGen::FnPrototype prototype(codegen, "IsNull", codegen->get_type(TYPE_BOOLEAN));
-    prototype.add_argument(LlvmCodeGen::NamedVariable("tuple", tuple_ptr_type));
-
-    llvm::Value* mask = codegen->get_int_constant(TYPE_TINYINT, _null_indicator_offset.bit_mask);
-    llvm::Value* zero = codegen->get_int_constant(TYPE_TINYINT, 0);
-    int byte_offset = _null_indicator_offset.byte_offset;
-
-    LlvmCodeGen::LlvmBuilder builder(codegen->context());
-    llvm::Value* tuple_ptr = NULL;
-    llvm::Function* fn = prototype.generate_prototype(&builder, &tuple_ptr);
-
-    llvm::Value* null_byte_ptr = builder.CreateStructGEP(tuple_ptr, byte_offset, "null_byte_ptr");
-    llvm::Value* null_byte = builder.CreateLoad(null_byte_ptr, "null_byte");
-    llvm::Value* null_mask = builder.CreateAnd(null_byte, mask, "null_mask");
-    llvm::Value* is_null = builder.CreateICmpNE(null_mask, zero, "is_null");
-    builder.CreateRet(is_null);
-
-    return _is_null_fn = codegen->finalize_function(fn);
-}
-
-// Generate function to set a slot to be null or not-null.  The resulting IR
-// for SetNotNull looks like:
-// (in this case the tuple contains only a nullable double)
-// define void @SetNotNull({ i8, double }* %tuple) {
-// entry:
-//   %null_byte_ptr = getelementptr inbounds { i8, double }* %tuple, i32 0, i32 0
-//   %null_byte = load i8* %null_byte_ptr
-//   %0 = and i8 %null_byte, -2
-//   store i8 %0, i8* %null_byte_ptr
-//   ret void
-// }
-llvm::Function* SlotDescriptor::codegen_update_null(LlvmCodeGen* codegen,
-        llvm::StructType* tuple, bool set_null) {
-    if (set_null && _set_null_fn != NULL) {
-        return _set_null_fn;
-    }
-
-    if (!set_null && _set_not_null_fn != NULL) {
-        return _set_not_null_fn;
-    }
-
-    llvm::PointerType* tuple_ptr_type = llvm::PointerType::get(tuple, 0);
-    LlvmCodeGen::FnPrototype prototype(codegen, (set_null) ? "SetNull" : "SetNotNull",
-                                       codegen->void_type());
-    prototype.add_argument(LlvmCodeGen::NamedVariable("tuple", tuple_ptr_type));
-
-    LlvmCodeGen::LlvmBuilder builder(codegen->context());
-    llvm::Value* tuple_ptr = NULL;
-    llvm::Function* fn = prototype.generate_prototype(&builder, &tuple_ptr);
-
-    llvm::Value* null_byte_ptr =
-        builder.CreateStructGEP(
-            tuple_ptr, _null_indicator_offset.byte_offset, "null_byte_ptr");
-    llvm::Value* null_byte = builder.CreateLoad(null_byte_ptr, "null_byte");
-    llvm::Value* result = NULL;
-
-    if (set_null) {
-        llvm::Value* null_set = codegen->get_int_constant(
-                              TYPE_TINYINT, _null_indicator_offset.bit_mask);
-        result = builder.CreateOr(null_byte, null_set);
-    } else {
-        llvm::Value* null_clear_val =
-            codegen->get_int_constant(TYPE_TINYINT, ~_null_indicator_offset.bit_mask);
-        result = builder.CreateAnd(null_byte, null_clear_val);
-    }
-
-    builder.CreateStore(result, null_byte_ptr);
-    builder.CreateRetVoid();
-
-    fn = codegen->finalize_function(fn);
-
-    if (set_null) {
-        _set_null_fn = fn;
-    } else {
-        _set_not_null_fn = fn;
-    }
-
-    return fn;
-}
-
-// The default llvm packing is identical to what we do in the FE.  Each field is aligned
-// to begin on the size for that type.
-// TODO: Understand llvm::SetTargetData which allows you to explicitly define the packing
-// rules.
-llvm::StructType* TupleDescriptor::generate_llvm_struct(LlvmCodeGen* codegen) {
-    // If we already generated the llvm type, just return it.
-    if (_llvm_struct != NULL) {
-        return _llvm_struct;
-    }
-
-    // For each null byte, add a byte to the struct
-    std::vector<llvm::Type*> struct_fields;
-    struct_fields.resize(_num_null_bytes + _num_materialized_slots);
-
-    for (int i = 0; i < _num_null_bytes; ++i) {
-        struct_fields[i] = codegen->get_type(TYPE_TINYINT);
-    }
-
-    // Add the slot types to the struct description.
-    for (int i = 0; i < slots().size(); ++i) {
-        SlotDescriptor* slot_desc = slots()[i];
-
-        if (slot_desc->is_materialized()) {
-            slot_desc->_field_idx = slot_desc->_slot_idx + _num_null_bytes;
-            DCHECK_LT(slot_desc->field_idx(), struct_fields.size());
-            struct_fields[slot_desc->field_idx()] = codegen->get_type(slot_desc->type().type);
-        }
-    }
-
-    // Construct the struct type.
-    llvm::StructType* tuple_struct = llvm::StructType::get(
-        codegen->context(), llvm::ArrayRef<llvm::Type*>(struct_fields));
-
-    // Verify the alignment is correct.  It is essential that the layout matches
-    // identically.  If the layout does not match, return NULL indicating the
-    // struct could not be codegen'd.  This will trigger codegen for anything using
-    // the tuple to be disabled.
-    const llvm::DataLayout* data_layout = codegen->execution_engine()->getDataLayout();
-    const llvm::StructLayout* layout = data_layout->getStructLayout(tuple_struct);
-    layout = data_layout->getStructLayout(tuple_struct);
-
-    if (layout->getSizeInBytes() != byte_size()) {
-        DCHECK_EQ(layout->getSizeInBytes(), byte_size());
-        return NULL;
-    }
-
-    for (int i = 0; i < slots().size(); ++i) {
-        SlotDescriptor* slot_desc = slots()[i];
-
-        if (slot_desc->is_materialized()) {
-            int field_idx = slot_desc->field_idx();
-
-            // Verify that the byte offset in the llvm struct matches the tuple offset
-            // computed in the FE
-            if (layout->getElementOffset(field_idx) != slot_desc->tuple_offset()) {
-                DCHECK_EQ(layout->getElementOffset(field_idx), slot_desc->tuple_offset());
-                return NULL;
-            }
-        }
-    }
-
-    _llvm_struct = tuple_struct;
-    return tuple_struct;
+bool SlotDescriptor::layout_equals(const SlotDescriptor& other_desc) const {
+    if (type().type != other_desc.type().type) return false;
+    if (is_nullable() != other_desc.is_nullable()) return false;
+    if (slot_size() != other_desc.slot_size()) return false;
+    if (tuple_offset() != other_desc.tuple_offset()) return false;
+    if (!null_indicator_offset().equals(other_desc.null_indicator_offset())) return false;
+  return true;
 }
 
 std::string DescriptorTbl::debug_string() const {

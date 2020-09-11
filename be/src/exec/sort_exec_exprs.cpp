@@ -1,6 +1,3 @@
-// Modifications copyright (C) 2017, Baidu.com, Inc.
-// Copyright 2017 The Apache Software Foundation
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -20,7 +17,7 @@
 
 #include "exec/sort_exec_exprs.h"
 
-namespace palo {
+namespace doris {
 
 Status SortExecExprs::init(const TSortInfo& sort_info, ObjectPool* pool) {
     return init(sort_info.ordering_exprs,
@@ -41,26 +38,26 @@ Status SortExecExprs::init(
     } else {
         _materialize_tuple = false;
     }
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SortExecExprs::init(const std::vector<ExprContext*>& lhs_ordering_expr_ctxs,
         const std::vector<ExprContext*>& rhs_ordering_expr_ctxs) {
     _lhs_ordering_expr_ctxs = lhs_ordering_expr_ctxs;
     _rhs_ordering_expr_ctxs = rhs_ordering_expr_ctxs;
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SortExecExprs::prepare(RuntimeState* state, const RowDescriptor& child_row_desc,
                               const RowDescriptor& output_row_desc,
-                              MemTracker* expr_mem_tracker) {
+                              const std::shared_ptr<MemTracker>& expr_mem_tracker) {
     if (_materialize_tuple) {
         RETURN_IF_ERROR(Expr::prepare(
                 _sort_tuple_slot_expr_ctxs, state, child_row_desc, expr_mem_tracker));
     }
     RETURN_IF_ERROR(Expr::prepare(
             _lhs_ordering_expr_ctxs, state, output_row_desc, expr_mem_tracker));
-    return Status::OK;
+    return Status::OK();
 }
 
 Status SortExecExprs::open(RuntimeState* state) {
@@ -70,7 +67,7 @@ Status SortExecExprs::open(RuntimeState* state) {
     RETURN_IF_ERROR(Expr::open(_lhs_ordering_expr_ctxs, state));
     RETURN_IF_ERROR(Expr::clone_if_not_exists(
             _lhs_ordering_expr_ctxs, state, &_rhs_ordering_expr_ctxs));
-    return Status::OK;
+    return Status::OK();
 }
 
 void SortExecExprs::close(RuntimeState* state) {
@@ -81,4 +78,4 @@ void SortExecExprs::close(RuntimeState* state) {
     Expr::close(_rhs_ordering_expr_ctxs, state);
 }
 
-} //namespace palo
+} //namespace doris

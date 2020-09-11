@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -13,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef BDG_PALO_BE_SRC_RUNTIME_EXPORT_TASK_MGR_H
-#define BDG_PALO_BE_SRC_RUNTIME_EXPORT_TASK_MGR_H
+#ifndef DORIS_BE_SRC_RUNTIME_EXPORT_TASK_MGR_H
+#define DORIS_BE_SRC_RUNTIME_EXPORT_TASK_MGR_H
 
 #include <mutex>
 #include <vector>
@@ -25,7 +27,7 @@
 #include "util/hash_util.hpp"
 #include "gen_cpp/Types_types.h"
 
-namespace palo {
+namespace doris {
 
 class ExecEnv;
 class PlanFragmentExecutor;
@@ -76,7 +78,7 @@ private:
     LruCache<TUniqueId, ExportTaskCtx> _failed_tasks;
 };
 
-} // end namespace palo
+} // end namespace doris
 
-#endif // BDG_PALO_BE_SRC_RUNTIME_EXPORT_TASK_MGR_H
+#endif // DORIS_BE_SRC_RUNTIME_EXPORT_TASK_MGR_H
 

@@ -1,8 +1,10 @@
-// Copyright (c) 2017, Baidu.com, Inc. All Rights Reserved
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
 //
 //   http://www.apache.org/licenses/LICENSE-2.0
 //
@@ -21,8 +23,9 @@
 
 #include "common/logging.h"
 #include "util/logging.h"
+#include "util/timezone_utils.h"
 
-namespace palo {
+namespace doris {
 
 class DateTimeValueTest : public testing::Test {
 public:
@@ -38,7 +41,7 @@ protected:
 
 // Assert size
 TEST_F(DateTimeValueTest, struct_size) {
-    ASSERT_EQ(12, sizeof(DateTimeValue));
+    ASSERT_EQ(16, sizeof(DateTimeValue));
 }
 
 TEST_F(DateTimeValueTest, equal) {
@@ -292,27 +295,48 @@ TEST_F(DateTimeValueTest, from_unixtime) {
     char str[MAX_DTVALUE_STR_LEN];
     DateTimeValue value;
 
-    value.from_unixtime(570672000);
+    value.from_unixtime(570672000, TimezoneUtils::default_time_zone);
     value.to_string(str);
-    ASSERT_STREQ("1988-02-01", str);
+    ASSERT_STREQ("1988-02-01 08:00:00", str);
+    
+    value.from_unixtime(253402271999, TimezoneUtils::default_time_zone);
+    value.to_string(str);
+    ASSERT_STREQ("9999-12-31 23:59:59", str);
+    
+    value.from_unixtime(0, TimezoneUtils::default_time_zone);
+    value.to_string(str);
+    ASSERT_STREQ("1970-01-01 08:00:00", str);
+
+    ASSERT_FALSE(value.from_unixtime(1586098092, "+20:00"));
+    ASSERT_FALSE(value.from_unixtime(1586098092, "foo"));
 }
 
 // Calculate format
 TEST_F(DateTimeValueTest, unix_timestamp) {
     DateTimeValue value;
-
+    int64_t timestamp;
     value.from_date_int64(19691231);
-    ASSERT_EQ(0, value.unix_timestamp());
+    value.unix_timestamp(&timestamp, TimezoneUtils::default_time_zone);
+    ASSERT_EQ(-115200, timestamp);
     value.from_date_int64(19700101);
-    ASSERT_EQ(0, value.unix_timestamp());
+    value.unix_timestamp(&timestamp, TimezoneUtils::default_time_zone);
+    ASSERT_EQ(0 - 28800, timestamp);
     value.from_date_int64(19700102);
-    ASSERT_EQ(86400, value.unix_timestamp());
+    value.unix_timestamp(&timestamp, TimezoneUtils::default_time_zone);
+    ASSERT_EQ(86400 - 28800, timestamp);
     value.from_date_int64(19880201000000);
-    ASSERT_EQ(570672000, value.unix_timestamp());
+    value.unix_timestamp(&timestamp, TimezoneUtils::default_time_zone);
+    ASSERT_EQ(570672000 - 28800, timestamp);
     value.from_date_int64(20380119);
-    ASSERT_EQ(2147472000, value.unix_timestamp());
+    value.unix_timestamp(&timestamp, TimezoneUtils::default_time_zone);
+    ASSERT_EQ(2147472000 - 28800, timestamp);
     value.from_date_int64(20380120);
-    ASSERT_EQ(0, value.unix_timestamp());
+    value.unix_timestamp(&timestamp, TimezoneUtils::default_time_zone);
+    ASSERT_EQ(2147529600, timestamp);
+	
+    value.from_date_int64(10000101);
+    value.unix_timestamp(&timestamp, TimezoneUtils::default_time_zone);
+    ASSERT_EQ(-30610252800, timestamp);
 }
 
 // Calculate format
@@ -497,13 +521,29 @@ TEST_F(DateTimeValueTest, from_date_format_str) {
     value.to_string(str);
     ASSERT_STREQ("2015-01-05 12:34:56", str);
 
-    //  hour
+    // hour
     format_str = "%Y-%m-%d %H %i %s";
     value_str = "88-2-1 03 4 5";
     ASSERT_TRUE(value.from_date_format_str(
             format_str.c_str(), format_str.size(), value_str.c_str(), value_str.size()));
     value.to_string(str);
     ASSERT_STREQ("1988-02-01 03:04:05", str);
+
+    // escape %
+    format_str = "%Y-%m-%d %H%%3A%i%%3A%s";
+    value_str = "2020-02-26 00%3A00%3A00";
+    ASSERT_TRUE(value.from_date_format_str(
+            format_str.c_str(), format_str.size(), value_str.c_str(), value_str.size()));
+    value.to_string(str);
+    ASSERT_STREQ("2020-02-26 00:00:00", str);
+
+    // escape %
+    format_str = "%Y-%m-%d%%%% %H%%3A%i%%3A%s";
+    value_str = "2020-02-26%% 00%3A00%3A00";
+    ASSERT_TRUE(value.from_date_format_str(
+            format_str.c_str(), format_str.size(), value_str.c_str(), value_str.size()));
+    value.to_string(str);
+    ASSERT_STREQ("2020-02-26 00:00:00", str);
 }
 
 // Calculate format
@@ -530,8 +570,14 @@ TEST_F(DateTimeValueTest, from_date_format_str_invalid) {
     value_str = "2015 1 1";
     ASSERT_FALSE(value.from_date_format_str(
             format_str.c_str(), format_str.size(), value_str.c_str(), value_str.size()));
+
     format_str = "%x %V %w";
     value_str = "2015 1 1";
+    ASSERT_FALSE(value.from_date_format_str(
+            format_str.c_str(), format_str.size(), value_str.c_str(), value_str.size()));
+
+    format_str = "%Y-%m-%d %H%3A%i%3A%s";
+    value_str = "2020-02-26 00%3A00%3A00";
     ASSERT_FALSE(value.from_date_format_str(
             format_str.c_str(), format_str.size(), value_str.c_str(), value_str.size()));
 }
@@ -1372,14 +1418,14 @@ TEST_F(DateTimeValueTest, packed_time) {
     }
 
     {
-        palo_udf::DateTimeVal tv;
+        doris_udf::DateTimeVal tv;
         tv.packed_time = 1830650338932162560L;
         tv.type = TIME_DATETIME;
         DateTimeValue v1 = DateTimeValue::from_datetime_val(tv);
         v1.to_string(buf);
         ASSERT_STREQ("2001-02-03 12:34:56", buf);
 
-        palo_udf::DateTimeVal tv2;
+        doris_udf::DateTimeVal tv2;
         v1.to_datetime_val(&tv2);
 
         ASSERT_TRUE(tv == tv2);
@@ -1390,12 +1436,12 @@ TEST_F(DateTimeValueTest, packed_time) {
 }
 
 int main(int argc, char** argv) {
-    // std::string conffile = std::string(getenv("PALO_HOME")) + "/conf/be.conf";
-    // if (!palo::config::init(conffile.c_str(), false)) {
+    // std::string conffile = std::string(getenv("DORIS_HOME")) + "/conf/be.conf";
+    // if (!doris::config::init(conffile.c_str(), false)) {
     //     fprintf(stderr, "error read config file. \n");
     //     return -1;
     // }
-    // palo::init_glog("be-test");
+    // doris::init_glog("be-test");
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
